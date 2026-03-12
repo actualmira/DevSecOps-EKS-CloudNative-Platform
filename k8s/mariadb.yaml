@@ -1,0 +1,72 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: mariadb-storage
+provisioner: k8s.io/minikube-hostpath
+volumeBindingMode: Immediate
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mariadb
+  namespace: production
+spec:
+  serviceName: mariadb-svc
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      containers:
+        - name: mariadb
+          image: mariadb:10
+          env:
+            - name: MARIADB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb-secret
+                  key: root-password
+            - name: MARIADB_DATABASE
+              value: "dvwa"
+            - name: MARIADB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb-secret
+                  key: db-user
+            - name: MARIADB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb-secret
+                  key: db-password
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - name: mariadb-data
+              mountPath: /var/lib/mysql
+  volumeClaimTemplates:
+    - metadata:
+        name: mariadb-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: mariadb-storage
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb-svc
+  namespace: production
+spec:
+  selector:
+    app: mariadb
+  ports:
+    - port: 3306
+      targetPort: 3306
+  clusterIP: None
