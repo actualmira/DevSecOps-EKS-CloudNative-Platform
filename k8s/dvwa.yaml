@@ -16,6 +16,15 @@ spec:
       containers:
         - name: dvwa
           image: ghcr.io/digininja/dvwa:latest
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 998
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop:
+                - ALL
           ports:
             - containerPort: 80
           env:
