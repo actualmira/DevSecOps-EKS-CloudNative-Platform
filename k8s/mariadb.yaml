@@ -5,6 +5,23 @@ metadata:
 provisioner: k8s.io/minikube-hostpath
 volumeBindingMode: Immediate
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mariadb-init
+  namespace: production
+data:
+  healthcheck.sh: |
+    #!/bin/sh
+    mysql -u root -p"${MARIADB_ROOT_PASSWORD}" <<EOF
+    CREATE USER IF NOT EXISTS 'healthcheck'@'127.0.0.1' IDENTIFIED BY '${HEALTHCHECK_PASSWORD}';
+    ALTER USER 'healthcheck'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('${HEALTHCHECK_PASSWORD}');
+    REVOKE ALL PRIVILEGES ON dvwa.* FROM 'app_user'@'%';
+    GRANT SELECT, INSERT, UPDATE, ON dvwa.* TO 'app_user'@'%';
+    DROP USER IF EXISTS 'root'@'%';
+    FLUSH PRIVILEGES;
+    EOF
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -21,6 +38,7 @@ spec:
       labels:
         app: mariadb
     spec:
+      serviceAccountName: mariadb-sva
       securityContext:
         runAsNonRoot: true
         fsGroup: 999
@@ -31,11 +49,22 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsUser: 999
+            readOnlyRootFilesystem: true
             seccompProfile:
               type: RuntimeDefault
             capabilities:
               drop:
                 - ALL
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - mysqladmin ping -h 127.0.0.1 -uhealthcheck -p${HEALTHCHECK_PASSWORD}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
           env:
             - name: MARIADB_ROOT_PASSWORD
               valueFrom:
@@ -54,11 +83,38 @@ spec:
                 secretKeyRef:
                   name: mariadb-secret
                   key: db-password
+            - name: HEALTHCHECK_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb-secret
+                  key: healthcheck-password
           ports:
             - containerPort: 3306
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
           volumeMounts:
             - name: mariadb-data
               mountPath: /var/lib/mysql
+            - name: init-script
+              mountPath: /docker-entrypoint-initdb.d
+            - name: tmp
+              mountPath: /tmp
+            - name: run
+              mountPath: /var/run/mysqld
+      volumes:
+        - name: init-script
+          configMap:
+            name: mariadb-init
+        - name: tmp
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+
   volumeClaimTemplates:
     - metadata:
         name: mariadb-data

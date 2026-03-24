@@ -13,6 +13,7 @@ spec:
       labels:
         app: dvwa
     spec:
+      serviceAccountName: dvwa-sva
       containers:
         - name: dvwa
           image: ghcr.io/digininja/dvwa:latest
@@ -20,6 +21,7 @@ spec:
             runAsNonRoot: true
             runAsUser: 998
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             seccompProfile:
               type: RuntimeDefault
             capabilities:
@@ -27,6 +29,14 @@ spec:
                 - ALL
           ports:
             - containerPort: 80
+          livenessProbe:
+            httpGet:
+              path: /login.php
+              port: 80
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
           env:
             - name: DB_SERVER
               value: "mariadb-svc.production.svc.cluster.local"
@@ -44,6 +54,29 @@ spec:
                   key: db-password
             - name: DB_PORT
               value: "3306"
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "400m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: dvwa-data
+              mountPath: /tmp
+            - name: apache-run
+              mountPath: /var/run/apache2
+            - name: dvwa-uploads
+              mountPath: /var/www/html/hackable/uploads
+
+      volumes:
+        - name: dvwa-data
+          emptyDir: {}
+        - name: apache-run
+          emptyDir: {}
+        - name: dvwa-uploads
+          emptyDir: {}
+
 ---
 apiVersion: v1
 kind: Service
