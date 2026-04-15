@@ -16,8 +16,8 @@ data:
     mysql -u root -p"${MARIADB_ROOT_PASSWORD}" <<EOF
     CREATE USER IF NOT EXISTS 'healthcheck'@'127.0.0.1' IDENTIFIED BY '${HEALTHCHECK_PASSWORD}';
     ALTER USER 'healthcheck'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('${HEALTHCHECK_PASSWORD}');
-    REVOKE ALL PRIVILEGES ON dvwa.* FROM 'app_user'@'%';
-    GRANT SELECT, INSERT, UPDATE, ON dvwa.* TO 'app_user'@'%';
+    REVOKE ALL PRIVILEGES ON dvwa.* FROM '${MARIADB_USER}'@'%';
+    GRANT SELECT, INSERT, UPDATE ON dvwa.* TO '${MARIADB_USER}'@'%';
     DROP USER IF EXISTS 'root'@'%';
     FLUSH PRIVILEGES;
     EOF

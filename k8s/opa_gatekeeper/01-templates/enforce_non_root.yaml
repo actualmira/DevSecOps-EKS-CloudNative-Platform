@@ -1,0 +1,49 @@
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: enforcenonrootuser
+spec:
+  crd:
+    spec:
+      names:
+        kind: EnforceNonRootUser
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package enforcenonrootuser
+        violation[{"msg": msg}] {
+          pod_spec := get_pod_spec(input.review.object)
+          container := pod_spec.containers[_]
+          not container.securityContext.runAsNonRoot == true
+          not pod_spec.securityContext.runAsNonRoot == true
+          msg := sprintf("RunAsNonRoot is not enforced for container '%v'", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          pod_spec := get_pod_spec(input.review.object)
+          container := pod_spec.containers[_]
+          container.securityContext.runAsNonRoot == false
+          msg := sprintf("RunAsNonRoot is overridden for container '%v'", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          pod_spec := get_pod_spec(input.review.object)
+          container := pod_spec.containers[_]
+          container.securityContext.runAsUser == 0
+          msg := sprintf("Container '%v' must not run as user 0", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          pod_spec := get_pod_spec(input.review.object)
+          pod_spec.securityContext.runAsUser == 0
+          msg := "Run as user 0 is prohibited"
+        }
+
+        get_pod_spec(obj) = spec {
+          obj.kind == "Pod"
+          spec := obj.spec
+        }
+
+        get_pod_spec(obj) = spec {
+          spec := obj.spec.template.spec
+        }

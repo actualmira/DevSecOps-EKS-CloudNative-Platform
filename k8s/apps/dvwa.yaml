@@ -16,7 +16,7 @@ spec:
       serviceAccountName: dvwa-sva
       containers:
         - name: dvwa
-          image: ghcr.io/digininja/dvwa:latest
+          image: ghcr.io/digininja/dvwa:33e364c
           securityContext:
             runAsNonRoot: true
             runAsUser: 998

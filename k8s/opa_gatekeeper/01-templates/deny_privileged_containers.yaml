@@ -1,0 +1,28 @@
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: denyprivilegedcontainer
+spec:
+  crd:
+    spec:
+      names:
+        kind: DenyPrivilegedContainer
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package denyprivilegedcontainer
+        violation[{"msg": msg}] {
+          pod_spec := get_pod_spec(input.review.object)
+          container :=pod_spec.containers[_]
+          container.securityContext.privileged == true
+          msg := sprintf("Container '%v' must not run as privileged", [container.name])
+        }
+
+        get_pod_spec(obj) = spec {
+         obj.kind == "Pod"
+         spec := obj.spec
+        }
+
+        get_pod_spec(obj) = spec {
+          spec := obj.spec.template.spec
+        }
