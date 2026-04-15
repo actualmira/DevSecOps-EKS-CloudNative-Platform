@@ -1,0 +1,29 @@
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: enforcereadonlyrootfilesystem
+spec:
+  crd:
+    spec:
+      names:
+        kind: EnforceReadOnlyRootFilesystem
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package enforcereadonlyrootfilesystem
+        violation[{"msg": msg}] {
+          pod_spec := get_pod_spec(input.review.object)
+          container := pod_spec.containers[_]
+          not container.securityContext.readOnlyRootFilesystem == true
+          msg := sprintf("Read only root filesystem must be enforced for container '%v'", [container.name])
+        }
+
+         get_pod_spec(obj) = spec {
+          obj.kind == "Pod"
+          spec := obj.spec
+        }
+
+         get_pod_spec(obj) = spec {
+          spec := obj.spec.template.spec
+        }
+

@@ -1,0 +1,36 @@
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: blocklatestimagetag
+spec:
+  crd:
+    spec:
+      names:
+        kind: BlockLatestImageTag
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package blocklatestimagetag
+        violation[{"msg": msg}] {
+          pod_spec := get_pod_spec(input.review.object)
+          container := pod_spec.containers[_]
+          endswith(container.image, ":latest")
+          msg := sprintf("Container '%v' must not use the latest image tag", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          pod_spec := get_pod_spec(input.review.object)
+          container := pod_spec.containers[_]
+          not contains(container.image, ":")
+          msg := sprintf("A specific image version tag is required for Container '%v'", [container.name])
+        }
+
+        get_pod_spec(obj) = spec {
+          obj.kind == "Pod"
+          spec := obj.spec
+        }
+
+        get_pod_spec(obj) = spec {
+          spec := obj.spec.template.spec
+        }
+
