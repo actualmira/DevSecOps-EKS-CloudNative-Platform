@@ -4,6 +4,8 @@ metadata:
   name: enforce-read-only-root-filesystem
 spec:
   match:
+    excludedNamespaces:
+      - falco
     kinds:
       - apiGroups: [""]
         kinds: ["Pod"]

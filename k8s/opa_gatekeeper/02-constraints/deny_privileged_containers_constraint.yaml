@@ -4,6 +4,8 @@ metadata:
   name: deny-privileged-containers
 spec:
   match:
+    excludedNamespaces:
+      - falco
     kinds:
       - apiGroups: [""]
         kinds: ["Pod"]

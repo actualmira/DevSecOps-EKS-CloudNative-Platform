@@ -1,0 +1,157 @@
+tty: true
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+falcoctl:
+  artifact:
+    follow:
+      resources:
+        requests:
+          cpu: "10m"
+          memory: "64Mi"
+        limits:
+          cpu: "100m"
+          memory: "128Mi"
+
+falco:
+  rules_files:
+    - /etc/falco/falco_rules.yaml
+    - /etc/falco/rules.d
+
+customRules:
+  custom_rules.yaml: |-
+
+    - macro: known_drop_and_execute_activities
+      override:
+        condition: append
+      condition: >
+        or proc.name in (calico, portmap)
+        or proc.exepath startswith "/opt/cni/bin/"
+
+    - macro: outbound
+      condition: >
+        evt.type = connect and
+        fd.typechar in (4, 6) and
+        fd.sip != "0.0.0.0" and
+        fd.sport != 0 and
+        fd.net != "127.0.0.0/8"
+
+    - macro: calico_cni
+      condition: proc.exepath startswith /opt/cni/bin/ or
+        container.image.repository = quay.io/calico/node or
+        container.image.repository = quay.io/calico/kube-controllers or
+        container.image.repository = falcosecurity/falco
+
+    - rule: Shell Spawned in Container
+      desc: A shell process spawned inside a running container.
+      condition: >
+        spawned_process and
+        container and
+        shell_procs and
+        not proc.pname in (shell_procs) and
+        not user.name = healthcheck and
+        not (container.image.repository = mariadb and proc.cmdline contains mysqladmin)
+      output: "Shell spawned in container (user=%user.name container=%container.name image=%container.image.repository shell=%proc.name parent=%proc.pname cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)"
+      priority: WARNING
+      tags: [container, shell]
+
+    - rule: Write to etc-passwd in Container
+      desc: A process attempted to write to /etc/passwd inside a container.
+      condition: open_write and container and fd.name = /etc/passwd
+      output: "Write to /etc/passwd detected in container (user=%user.name container=%container.name image=%container.image.repository file=%fd.name cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)"
+      priority: CRITICAL
+      tags: [container, filesystem]
+
+    - rule: Unexpected Outbound Port from Container
+      desc: A container process made an outbound connection to an unexpected port
+      condition: >
+        outbound and
+        container and
+        not fd.sport in (3306, 53, 443) and
+        not calico_cni
+      output: "Unexpected outbound port from container (user=%user.name container=%container.name image=%container.image.repository connection=%fd.name port=%fd.rport cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)"
+      priority: ERROR
+      tags: [network, container]
+
+    - rule: Unexpected Process Connecting on Port 443
+      desc: A process that is not on the allowed list made an outbound connection on port 443.
+      condition: >
+        outbound and
+        container and
+        fd.sport = 443 and
+        not proc.name in (falcoctl) and
+        not calico_cni
+      output: "Unexpected process connecting on port 443 (user=%user.name process=%proc.name container=%container.name image=%container.image.repository connection=%fd.name cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)"
+      priority: CRITICAL
+      tags: [network, c2]
+
+    - rule: Privilege Escalation Syscall in Container
+      desc: A process executed a setuid or setgid syscall inside a container.
+      condition: >
+        container and
+        evt.type in (setuid, setgid) and
+        not user.uid = 0 and
+        not (proc.name startswith runc and proc.cmdline contains init)
+      output: "Privilege escalation syscall in container (user=%user.name uid=%user.uid container=%container.name image=%container.image.repository syscall=%evt.type cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)"
+      priority: CRITICAL
+      tags: [syscall, privilege_escalation]
+
+    - rule: Security Agent Termination Attempt
+      desc: An attempt was made to terminate the Falco security monitoring process.
+      condition: >
+        spawned_process and
+        proc.name in (kill, pkill, killall) and
+        proc.cmdline contains falco
+      output: "Falco agent termination attempt detected (user=%user.name process=%proc.name cmdline=%proc.cmdline container=%container.name namespace=%k8s.ns.name pod=%k8s.pod.name)"
+      priority: CRITICAL
+      tags: [falco, tamper]
+
+    - rule: Unexpected Write to Host Path from Container
+      desc: A container process wrote to a host path.
+      condition: >
+        open_write and
+        container and
+        fd.name startswith /host and
+        not (proc.name = falco and fd.name in (/host/proc, /host/proc/sys/kernel))
+      output: "Unexpected write to host path from container (user=%user.name container=%container.name image=%container.image.repository file=%fd.name cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)"
+      priority: CRITICAL
+      tags: [container_escape, filesystem]
+
+    - rule: Read Sensitive Credential File in Container
+      desc: A process read a sensitive credential file inside a container.
+      condition: open_read and container and fd.name in (/etc/shadow, /etc/sudoers, /etc/pam.conf)
+      output: "Sensitive credential file read in container (user=%user.name process=%proc.name container=%container.name image=%container.image.repository file=%fd.name cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)"
+      priority: CRITICAL
+      tags: [credentials]
+
+falcosidekick:
+  enabled: true
+  replicaCount: 1
+  serviceAccount:
+    create: false
+    name: falco-sidekick
+  resources:
+    requests:
+      cpu: "10m"
+      memory: "64Mi"
+    limits:
+      cpu: "100m"
+      memory: "128Mi"
+  webui:
+    enabled: false
+  config:
+    extraEnv:
+      - name: KUBERNETESPODDELETE_ENABLED
+        value: "true"
+      - name: KUBERNETESPODDELETE_MINIMUMPRIORITY
+        value: "critical"
+      - name: KUBERNETESPODDELETE_ALLOWEDNAMESPACES
+        value: "production"
+
+
