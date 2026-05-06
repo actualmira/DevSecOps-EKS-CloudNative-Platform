@@ -4,6 +4,8 @@ metadata:
   name: enforce-non-root-user
 spec:
   match:
+    excludedNamespaces:
+      - falco
     kinds:
       - apiGroups: [""]
         kinds: ["Pod"]

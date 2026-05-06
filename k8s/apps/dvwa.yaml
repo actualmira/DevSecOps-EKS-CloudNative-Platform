@@ -13,6 +13,7 @@ spec:
       labels:
         app: dvwa
     spec:
+      automountServiceAccountToken: false
       serviceAccountName: dvwa-sva
       containers:
         - name: dvwa
@@ -29,9 +30,17 @@ spec:
                 - ALL
           ports:
             - containerPort: 80
-          livenessProbe:
+          readinessProbe:
             httpGet:
               path: /login.php
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
               port: 80
             initialDelaySeconds: 60
             periodSeconds: 30

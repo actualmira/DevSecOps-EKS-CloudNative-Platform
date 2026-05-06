@@ -38,6 +38,7 @@ spec:
       labels:
         app: mariadb
     spec:
+      automountServiceAccountToken: false
       serviceAccountName: mariadb-sva
       securityContext:
         runAsNonRoot: true
@@ -55,6 +56,16 @@ spec:
             capabilities:
               drop:
                 - ALL
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - mysqladmin ping -h 127.0.0.1 -uhealthcheck -p${HEALTHCHECK_PASSWORD}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           livenessProbe:
             exec:
               command:
