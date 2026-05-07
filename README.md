@@ -127,7 +127,7 @@ On top of what the restricted profile mandates, I implemented the following cont
 
 - runAsUser: 999 on MariaDB and runAsUser: 998 on DVWA. This will prevent permission errors and avoid any ambiguity about which user the process identity should resolve to.
 
-- fsGroup: 999 on MariaDB with fsGroupChangePolicy: OnRootMismatch. The MariaDB will require exclusive ownership of its data directory. Without correct ownership, MariaDB will refuse to start because it cannot read or write its own data files. I configured this to allow Kubernetes set the PersistentVolume group ownership before the container starts, avoiding the need for CHOWN capability, a privileged operation or an init script to fix permissions. *fsGroupChangePolicy: OnRootMismatch* ensures ownership is only changed if it does not already match to avoid unnecessary recursive permission operations on large volumes.
+- fsGroup: 999 on MariaDB with fsGroupChangePolicy: OnRootMismatch. The MariaDB will require exclusive ownership of its data directory. Without correct ownership, MariaDB will refuse to start because it cannot read or write its own data files. I configured this to allow Kubernetes set the PersistentVolume group ownership before the container starts, avoiding the need for CHOWN capability which is a privileged operation to fix permissions. *fsGroupChangePolicy: OnRootMismatch* ensures ownership is only changed if it does not already match to avoid unnecessary recursive permission operations on large volumes.
 
 - readOnlyRootFilesystem: true on both pods. I mounted the container filesystem for both pods as read-only. This prevents a compromised container from writing malicious binaries, modifying application code, or staging exfiltrated data anywhere on its own filesystem outside of explicitly defined writable mounts. This directly reduces the blast radius if a compromise is successful, addressing the threats of an attacker escaping the container, or the database files being modified to inject backdoors or corrupt audit records.
 
@@ -160,17 +160,47 @@ volumes:
     emptyDir: {}
 ```
 
-- Liveness probes on both pods: I configured liveness probes to detect when a container is running but is no longer responding to requests. This will provide automated self healing for both pods. 
+-  Readiness and Liveness probes on both pods:
+I configured readiness probes to ensure that the applications pods are ready before kubernetes starts sending in traffic, and liveness probes to detect when a container is running but is no longer responding to requests which will provide automated self healing for the pod by kubernetes restarting the pod. 
 
-- On DVWA, I configured an HTTP probe to hit the application on port 80 every 30 seconds. For MariaDB, I configured an exec probe that runs mysqladmin ping using the dedicated healthcheck user every 30 seconds.
+- On DVWA, I configured readiness probe on /login.php and liveness on /. This is because readiness */login.php* requires the full stack to be available (Apache, PHP, and the database connection), so traffic will not be sent to DVWA if MariaDB is unavailable. For liveness probe, I used / so that if MariaDB is temporarily unavailable, Kubernetes will not restart DVWA unnecessarily when Apache is healthy.
   
-- I created the dedicated healthcheck user using an init script mounted at /docker-entrypoint-initdb.d/. I generated a strong password using openssl rand number generator, stored the password in Kubernetes Secret and injected it through environment variable which is consistent with the no hardcoded secret security principle.
+```yaml
+readinessProbe:
+  httpGet:
+    path: /login.php
+    port: 80
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+livenessProbe:
+  httpGet:
+    path: /
+    port: 80
+initialDelaySeconds: 60
+periodSeconds: 30
+timeoutSeconds: 10
+failureThreshold: 3
+```
+  
+- For MariaDB, I configured exec probes that runs mysqladmin ping using the dedicated healthchecks. I created the dedicated healthcheck user using an init script mounted at /docker-entrypoint-initdb.d/. I generated a strong password using openssl rand number generator, stored the password in Kubernetes Secret and injected it through environment variable which is consistent with the no hardcoded secret security principle.
 
-- I created a dedicated healtchcheck user rather than reusing the application credentials because coupling health check credentials to the application credentials means if the application password rotates, the liveness probe will silently break leading to CrashLoopBack error on the pod making the database appear unavailable. Also, a dedicated user with minimal privileges follows the priciple of least privilege and will limit what an attacker can access if they observe the probe command.
+- I created a dedicated healtchcheck user rather than reusing the application credentials because coupling health check credentials to the application credentials means if the application password rotates, the probes will silently break leading to uneccessary restarts on the pod making the database appear unavailable. Also, a dedicated user with minimal privileges follows the priciple of least privilege and will limit what an attacker can access if they observe the probe command.
   
-- I also implemented password requirement for the dedicated healthcheck user to mitigate lateral movement. Although the user is restricted to localhost, all containers in a pod share the same network namespace and therefore the same localhost. If a sidecar were added to the MariaDB pod in future, it would inherit localhost trust. Without a password, any process in the pod could connect to MariaDB as the healthcheck user with no barrier.
+- I also implemented password requirement for the dedicated healthcheck user to mitigate lateral movement. Although the user is restricted to localhost, all containers in a pod share the same network namespace and therefore the same localhost. If I add a sidecar to the MariaDB pod in future, it would inherit localhost trust. Without a password, any process in the pod could connect to MariaDB as the healthcheck user with no barrier.
 
 ```yaml
+readinessProbe:
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - mysqladmin ping -h 127.0.0.1 -uhealthcheck -p${HEALTHCHECK_PASSWORD}
+  initialDelaySeconds: 20
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
 livenessProbe:
   exec:
     command:
@@ -183,7 +213,7 @@ livenessProbe:
   failureThreshold: 3
 ```
 
-- I configured the liveness probe for mariadb to use -h 127.0.0.1 rather than -h localhost. This is because when -h localhost is used, MariaDB connects via Unix socket and applies unix_socket authentication based on the Linux system user identity. Since the healthcheck database user is not the system user, authentication fails regardless of password. Using -h 127.0.0.1 forces TCP which always uses password authentication. I used the IDENTIFIED VIA mysql_native_password clause in the init script to ensure password authentication is used regardless of MariaDB's defaults.
+- I configured the readiness and liveness probes for mariadb to use -h 127.0.0.1 rather than -h localhost. This is because when -h localhost is used, MariaDB connects via Unix socket and applies unix_socket authentication based on the Linux system user identity. Since the healthcheck database user is not the system user, authentication fails regardless of password. Using -h 127.0.0.1 forces TCP which always uses password authentication. I used the IDENTIFIED VIA mysql_native_password clause in the init script to ensure password authentication is used regardless of MariaDB's defaults.
 
 - However this alone was not sufficient because MariaDB's internal mysql_secure_installation equivalent runs after the init script and resets the authentication plugin for local users to unix_socket which overrides the plugin set during user creation. I fixed this by using a *Heredoc file* for the init script in order to control the sequence, then I added an explicit ALTER USER statement in the init script which runs after mysql_secure_installation completes.
 
@@ -230,6 +260,8 @@ I configured the StorageClass for MariaDB to use volumeBindingMode: Immediate in
 
 I created dedicated [ServiceAccount](k8s/apps/rbac.yaml) per workload for dvwa and MariaDB with empty Roles granting zero Kubernetes API permissions because neither pod needs to call the Kubernetes API. The dedicated identity ensures that audit logs are recorded separately for each ServiceAccount, and permissions can be adjusted per workload independently without affecting the other. This directly addresses the threat of a stolen Kubernetes service account token being used to impersonate an administrator and perform unauthorised cluster operations, or a service account with limited permissions exploiting a Kubernetes vulnerability to escalate to cluster-admin. Because ServiceAccounts are mounted at the pod level, not the container level, every container in a pod inherits the same ServiceAccount token. If a pod had multiple containers with different trust levels, the less trusted container would inherit the same token as the more privileged one. 
 
+I configured *automountServiceAccountToken: false* for both pods because even with the dedicated ServiceAccounts and empty roles, the token is still mounted into the pod filesystem by default. This means that if an attacker gains code execution inside DVWA or MariaDB, they can read that token and use it to authenticate to the Kubernetes API directly and be able to perform reconnaissance inside the cluster.
+
 ### NetworkPolicy with Calico CNI
 
 I applied three [NetworkPolicy objects](k8s/apps/network_policy.yaml): 
@@ -255,9 +287,9 @@ The Network Policies select pods by label, this means that any pod created in th
 
 ### OPA Gatekeeper Policy with Rego
 
-I installed OPA Gatekeeper wrote custom ConstraintTemplates using Rego for the kubernetes security controls I enforced, this serves as a second layer of control acting at the admission level. I configured all ConstraintTemplates to target both naked Pods and controller resources so that every resource is intercepted irrespective of how it is applied. 
+I installed OPA Gatekeeper, wrote custom ConstraintTemplates using Rego for the kubernetes security controls I enforced, this serves as a second layer of control acting at the admission level. I configured all ConstraintTemplates to target both naked Pods and controller resources so that every resource is intercepted irrespective of how it is applied. 
 
-- **[EnforceNonRootUser](k8s/opa_gatekeeper/01-templates/enforce_non_root.yaml)** [See
+- **[EnforceNonRootUser](k8s/opa_gatekeeper/01-templates/enforce_non_root.yaml)** 
 
 ```yaml
   targets:
@@ -301,6 +333,8 @@ I installed OPA Gatekeeper wrote custom ConstraintTemplates using Rego for the k
           spec := obj.spec.template.spec
         }
 ```
+The first block catches when run as non root is not enforced either at the pod or container level. The second block catches when the container level tries to override run as non root user enforced at the pod level. The third and fourth blocks will catch when UID of 0 is explicitly assigned to either the pod or container.
+
  **[See Constraint](k8s/opa_gatekeeper/02-constraints/runasnonroot_constraint.yaml)**
 
 - **[RequireResourceLimits](k8s/opa_gatekeeper/01-templates/require_resource_limits.yaml)**: **[See Constraint](k8s/opa_gatekeeper/02-constraints/require_resource_limits_constraint.yaml)**
@@ -347,6 +381,19 @@ targets:
         rule := input.review.object.rules[_]
         wildcard(rule)
         msg := sprintf("Role '%v' is not allowed to use Wildcard '*' permissions", [input.review.object.metadata.name])
+      }
+
+      wildcard(rule) { rule.verbs[_] == "*" }
+        wildcard(rule) { rule.resources[_] == "*" }
+        wildcard(rule) { rule.apiGroups[_] == "*" }
+
+        get_pod_spec(obj) = spec {
+          obj.kind == "Pod"
+          spec := obj.spec
+        }
+
+        get_pod_spec(obj) = spec {
+          spec := obj.spec.template.spec
         }
 
 ```
@@ -402,7 +449,7 @@ I used nested object.get calls rather than direct path access because direct pat
 ```
   **[See Constraint](k8s/opa_gatekeeper/02-constraints/network_policy_constraint.yaml)**
 
-To enforce the network policy, I configured the [config file](k8s/opa_gatekeeper/00-setup/sync.yaml) for OPA Gatekeeper to enable it sync information from *data.inventory* because without it, Gatekeeper as an admission controller can only inspect the resource currently being submitted.
+To enforce the network policy, I configured the [config file](k8s/opa_gatekeeper/00-setup/sync.yaml) for OPA Gatekeeper to enable it sync network policies from *data.inventory* because without it, Gatekeeper as an admission controller can only inspect the resource currently being submitted.
 
 ```yaml
 apiVersion: config.gatekeeper.sh/v1alpha1
@@ -421,3 +468,205 @@ spec:
 ### I validated all these rules by applying a non complaint pod
 
 ![opa gatekeeper violation](screenshots/phase1/opa_gatekeeper_violation.png)
+
+### Falco Runtime Security
+
+Before deploying falco with Helm for runtime threat detection, I excluded the falco namespace from some OPA Gatekeeper policies because falco runs as a DaemonSet that needs access to the host kernel to monitor syscalls. It mounts host paths like /proc, /sys/kernel and container runtime sockets directly. This means that it legitimately needs a privileged security context. Blocking these at admission would prevent Falco from starting entirely.
+
+- *DenyPrivilegedContainer:* Falco's driver loader init container needs privileged access to load the eBPF probe into the kernel.
+- *EnforceNonRootUser:* Falco needs root privileges to monitor syscalls.
+- *EnforceReadOnlyRootFilesystem:* Falco writes its eBPF probe and internal state to the container filesystem during startup. A read-only root filesystem would break this.
+
+Following the principle of least privilege, I only excluded the falco namespace from the three minimum necessary policies it needs to function while leaving others (resource limits, NetworkPolicy enforcement, RBAC enforcement) active. 
+
+I also did not label the falco namespace with PSA Restricted for the same reasons because the restricted profile would block Falco's privileged containers at admission. Instead, I used OPA Gatekeeper policy exclusions that is more granular.
+
+### Falco Custom Rules and Macros
+
+- *outbound macro:* I rewrote this macro rather than using the default because the default Falco outbound macro explicitly excludes all RFC1918 private IP ranges. This means the default macro would ignore every connection within the Kubernetes cluster since all pod and service IPs fall in RFC1918 space. I removed the RFC1918 exclusion and replaced it with a loopback exclusion fd.net != "127.0.0.0/8" to keep health check connections to 127.0.0.1 out of scope while making sure all real cluster traffic is monitored.
+
+```yaml
+- macro: outbound
+  condition: >
+    evt.type = connect and
+    fd.typechar in (4, 6) and
+    fd.sip != "0.0.0.0" and
+    fd.sport != 0 and
+    fd.net != "127.0.0.0/8"
+```
+- *calico_cni macro:* Calico runs as a DaemonSet and makes frequent outbound connections as part of its normal networking operations including health checks to its own Felix component on port 9099, DNS queries, and Kubernetes API calls during pod network setup. Without this macro my outbound rules would flood with Calico false positives which can make real alerts invisible. I scoped the macro to cover all Calico components as well as Falco which also makes legitimate outbound connections.
+
+```yaml
+ - macro: calico_cni
+   condition: proc.exepath startswith /opt/cni/bin/ or
+     container.image.repository = quay.io/calico/node or
+     container.image.repository = quay.io/calico/kube-controllers or
+     container.image.repository = falcosecurity/falco
+```
+- *known_drop_and_execute_activities macro:* This is the default Falco macro that the Executing binary not part of base image rule checks against. Calico's CNI binaries live at /opt/cni/bin/ on the host and execute during pod network setup, Falco sees them as binaries that are not part of any container image and fires alerts constantly. I overrode it to add Calico CNI paths to prevent log flooding.
+
+```yaml
+- macro: known_drop_and_execute_activities
+  override:
+    condition: append
+  condition: >
+    or proc.name in (calico, portmap)
+    or proc.exepath startswith "/opt/cni/bin/"
+```
+- *Shell Spawned in Container rule:* The default Falco rule for terminal shell in container only fires when a shell is spawned with an interactive terminal attached. This would miss a common attack pattern where an attacker could exploit a web application vulnerability and use sh -c without an interactive terminal. I excluded the proc.tty requirement in my custom rule to catch that. I also excluded the MariaDB health check probe which legitimately spawns sh -c mysqladmin ping. By requiring both the mariadb image and mysqladmin in the command line to match, I made it harder to abuse it as an evasion path.
+
+```yaml
+ - rule: Shell Spawned in Container
+     desc: A shell process spawned inside a running container.
+     condition: >
+       spawned_process and
+       container and
+       shell_procs and
+       not proc.pname in (shell_procs) and
+       not user.name = healthcheck and
+       not (container.image.repository = mariadb and proc.cmdline contains mysqladmin)
+     output: "Shell spawned in container (user=%user.name container=%container.name image=%container.image.repository shell=%proc.name parent=%proc.pname cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)"
+     priority: WARNING
+     tags: [container, shell]
+```
+- *Security Agent Termination Attempt rule:* I added this as a tripwire for an attacker attempting to disable security monitoring before performing malicious activity. This rule fires before Falco is killed, this will give Sidekick a window to respond and also will alert the security team even if the kill attempt ultimately succeeds.
+
+```yaml
+- rule: Security Agent Termination Attempt
+    desc: An attempt was made to terminate the Falco security monitoring process.
+    condition: >
+      spawned_process and
+      proc.name in (kill, pkill, killall) and
+      proc.cmdline contains falco
+    output: "Falco agent termination attempt detected (user=%user.name process=%proc.name cmdline=%proc.cmdline container=%container.name namespace=%k8s.ns.name pod=%k8s.pod.name)"
+    priority: CRITICAL
+    tags: [falco, tamper]
+```
+- *Unexpected Process Connecting on Port 443:* An attacker can try to use port 443 to blend C2 traffic into legitimate HTTPS traffic. I separated this from the general outbound rule and raised it to CRITICAL because an application process like apache2 connecting to an arbitrary external IP on port 443 is a strong indicator of compromise. I allowed the calico_cni macro, falcoctl since they make legitimate HTTPS connections for rule updates and external notifications.
+
+```yaml
+- rule: Unexpected Process Connecting on Port 443
+    desc: A process that is not on the allowed list made an outbound connection on port 443.
+    condition: >
+      outbound and
+      container and
+      fd.sport = 443 and
+      not proc.name in (falcoctl) and
+      not calico_cni
+    output: "Unexpected process connecting on port 443 (user=%user.name process=%proc.name container=%container.name image=%container.image.repository connection=%fd.name cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)"
+    priority: CRITICAL
+    tags: [network, c2]
+```
+- *Privilege Escalation Syscall in Container rule:* Container escape exploits and various runc CVEs work by exploiting a vulnerability to call setuid(0) and gain root inside the container before breaking out. Monitoring setuid and setgid syscalls from non-root processes will give early warning of this pattern. I excluded runc because the container runtime legitimately calls setuid during container initialisation.
+
+```yaml
+- rule: Privilege Escalation Syscall in Container
+    desc: A process executed a setuid or setgid syscall inside a container.
+    condition: >
+      container and
+      evt.type in (setuid, setgid) and
+      not user.uid = 0 and
+      not (proc.name startswith runc and proc.cmdline contains init)
+    output: "Privilege escalation syscall in container (user=%user.name uid=%user.uid container=%container.name image=%container.image.repository syscall=%evt.type cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)"
+    priority: CRITICAL
+    tags: [syscall, privilege_escalation]
+```
+
+See the complete falco rules here: [values.yaml](k8s/falco/falco-values.yaml)
+
+I triggered the rules to confirm that falco is correctly firing the alerts.
+![Falco Firing](screenshots/phase1/falco_test.png)
+
+### Falco Sidekick
+
+I deployed Falco sidekick for automated threat response on critical cases
+
+- *[Custom Service Account:](k8s/falco/falco-sk-rbac.yaml)*  I created a custom ServiceAccount rather than using the default Helm ServiceAccount for Sidekick which uses a ClusterRoleBinding giving it cluster-wide permissions. Instead, I used a ClusterRole so that I can define the permission once but bound it with a namespace scoped RoleBinding in the production namespace only. This means Sidekick can delete pods in production namespace only but cannot in kube-system, falco, or gatekeeper-system namespaces to prevent it from being abused if the Sidekick pod is compromised. I also configured allowedNamespaces for only production namespace in Sidekick's own configuration as a second level filter. As I add new application namespaces in later phases, I will add a RoleBinding per namespace where neccessary and update allowedNamespaces.
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: falco-sidekick
+  namespace: falco
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: falco-sidekick-delete
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: falco-sidekick-rolebinding
+  namespace: production
+subjects:
+  - kind: ServiceAccount
+    name: falco-sidekick
+    namespace: falco
+roleRef:
+  kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
+  name: falco-sidekick-delete
+```
+
+- *[NetworkPolicy:](k8s/falco/falco-network-policy.yaml)*  I wrote three policies for the falco namespace: a default deny covering all pods as the baseline, a Falco specific policy, and a Sidekick specific policy using pod label selectors so that each component only has the access it needs.
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: falco-default-deny
+  namespace: falco
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: falco-network-policy
+  namespace: falco
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: falco
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+
+View the complete file above
+```
+
+Falco ingress allows no traffic because it does not need any incoming traffic, egress allows DNS for name resolutions, 443/TCP for falcoctl rule updates and falco to reach API server for enrinching its alerts with Kubernetes metadata, and then 2801/TCP to sidekick pod label for falco to reach Sidekick. 
+
+Sidekick ingress allows 2801/TCP from Falco pod label only, which will prevent any other pod from sending fake alerts to falsely trigger pod deletions. Sidekick egress allows DNS and 443/TCP in order to reach the Kubernetes API for pod deletion calls.
+
+I did not restrict 443 egress for Falco pod by destination IP because falcoctl downloads rule updates from ghcr.io which sits behind a CDN with dynamic IPs. On EKS, I will either integrate FQDN using the CNI or I will route through an egress proxy with Security Group control to prevent an attacker who compromised the Falco pod from exfiltrating data over HTTPS to any destination.
+
+For the Sidekick pod, I did not restrict 443 egress by destination IP of the Kubernetes API server due to similar reason; ClusterIP 10.96.0.1 although stable within a single cluster lifetime, it changes if the cluster is destroyed and recreated, which can happen as I am deveoping on Minikube. On EKS where the API server has a fixed endpoint DNS name, I will restrict Kubernetes API traffic using an ipBlock CIDR scoped to the EKS VPC CIDR to close this gap, as well as falco pod to kubernetes API internal commuinication.
+
+### Falco Sidekick Testing and Troubleshooting
+I spent time trying to get Falco Sidekick's automated pod deletion working on Minikube
+
+- I confirmed that Sidekick was running and listening on port 2801 and that the service was open.
+
+![Sidekick Listening](screenshots/phase1/sidekick-listening.png)
+
+
+- I ran curl command from inside the Falco pod to sidekick pod and it confirmed the network path was clear. 
+
+![Sidekick Connection](screenshots/phase1/falco-falcosidekick_connection.png)
+
+
+- Falco's ConfigMap showed that the http_output is enabled with the correct Sidekick URL. The kubernetesPodDelete settings in values.yaml were initially not being passed through to the Sidekick container via the generated Secret as expected. I worked around this by using extraEnv to set the environment variables directly, and I confirmed   that the variables reached the pod. But even with that resolved, sidekick was still not acting on the critical alerts I triggered. I removed the default deny NetworkPolicy temporarily, removed the pod selector restriction on port 2801 egress but none of these resolved the issue.
+
+
