@@ -178,10 +178,10 @@ livenessProbe:
   httpGet:
     path: /
     port: 80
-initialDelaySeconds: 60
-periodSeconds: 30
-timeoutSeconds: 10
-failureThreshold: 3
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
 ```
   
 - For MariaDB, I configured exec probes that runs mysqladmin ping using the dedicated healthchecks. I created the dedicated healthcheck user using an init script mounted at /docker-entrypoint-initdb.d/. I generated a strong password using openssl rand number generator, stored the password in Kubernetes Secret and injected it through environment variable which is consistent with the no hardcoded secret security principle.
