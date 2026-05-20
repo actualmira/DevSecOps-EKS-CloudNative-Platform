@@ -80,30 +80,30 @@ spec:
             - name: MARIADB_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mariadb-secret
+                  name: mariadb-secret-eso
                   key: root-password
             - name: MARIADB_DATABASE
               value: "dvwa"
             - name: MARIADB_USER
               valueFrom:
                 secretKeyRef:
-                  name: mariadb-secret
+                  name: mariadb-secret-eso
                   key: db-user
             - name: MARIADB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mariadb-secret
+                  name: mariadb-secret-eso
                   key: db-password
             - name: HEALTHCHECK_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mariadb-secret
+                  name: mariadb-secret-eso
                   key: healthcheck-password
           ports:
             - containerPort: 3306
           resources:
             requests:
-              cpu: "200m"
+              cpu: "50m"
               memory: "256Mi"
             limits:
               cpu: "500m"

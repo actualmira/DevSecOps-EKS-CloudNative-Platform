@@ -66,5 +66,5 @@ spec:
         - port: 53
           protocol: TCP
     - ports:
-        - port: 6443
+        - port: 443
           protocol: TCP

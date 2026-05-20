@@ -1,9 +1,3 @@
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: falco-sidekick
-  namespace: falco
----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -21,7 +15,7 @@ metadata:
   namespace: production
 subjects:
   - kind: ServiceAccount
-    name: falco-sidekick
+    name: falco-falcosidekick
     namespace: falco
 roleRef:
   kind: ClusterRole

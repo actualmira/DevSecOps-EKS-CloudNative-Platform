@@ -13,3 +13,4 @@ spec:
         kinds: ["Deployment", "StatefulSet", "DaemonSet"]
       - apiGroups: ["batch"]
         kinds: ["Job"]
+

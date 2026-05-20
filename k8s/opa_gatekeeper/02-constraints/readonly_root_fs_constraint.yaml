@@ -4,8 +4,6 @@ metadata:
   name: enforce-read-only-root-filesystem
 spec:
   match:
-    excludedNamespaces:
-      - falco
     kinds:
       - apiGroups: [""]
         kinds: ["Pod"]
@@ -13,4 +11,6 @@ spec:
         kinds: ["Deployment", "StatefulSet", "DaemonSet"]
       - apiGroups: ["batch"]
         kinds: ["Job"]
-
+    excludedNamespaces:
+      - falco
+      - kube-system
