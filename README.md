@@ -401,51 +401,35 @@ targets:
 
 - **[EnforceNetworkPolicy](k8s/opa_gatekeeper/01-templates/enforce_network_policy.yaml)**: 
 
-I used nested object.get calls rather than direct path access because direct path access will return undefined for namespaces with no networking resources defined which will cause the Rego rule to fail silently. Block 1 checks that at least one NetworkPolicy exists in the namespace. Block 2 checks that at least one existing NetworkPolicy selector covers the specific pod labels being deployed.
+Although PSS restricted profile controls pod security context, it doesn’t enforce network isolation and least privilege network connectivity. With this enforcement, any pod submitted to a namespace without a default deny network policy that selects all pods and covers both ingress and egress traffic will be blocked at admission.I used nested object.get calls rather than direct path access because direct path access will return undefined for namespaces with no networking resources defined which will cause the Rego rule to fail silently.
 
 ```yaml
-  targets:
-    - target: admission.k8s.gatekeeper.sh
-      rego: |
-        package enforcenetworkpolicy
-        violation[{"msg": msg}] {
-          ns := input.review.object.metadata.namespace
-          policies := object.get(object.get(data.inventory.namespace, ns, {}), "networking.k8s.io/v1", {})
-          networkpolicies := object.get(policies, "NetworkPolicy", {})
-          count(networkpolicies) == 0
-          msg := sprintf("Namespace '%v' does not have a network policy ", [ns])
-        }
+ targets:
+   - target: admission.k8s.gatekeeper.sh
+     rego: |
+       package enforcenetworkpolicy
+       violation[{"msg": msg}] {
+         ns := input.review.object.metadata.namespace
+         policies := object.get(object.get(data.inventory.namespace, ns, {}), "networking.k8s.io/v1", {})
+         networkpolicies := object.get(policies, "NetworkPolicy", {})
+         valid_deny_policies := [p |
+           p := networkpolicies[_]
+           is_default_deny(p.spec)
+         ]  
+         count(valid_deny_policies) == 0
+         msg := sprintf("Namespace '%v' does not have a network policy", [ns])
+       }
 
-        violation[{"msg": msg}] {
-          ns := input.review.object.metadata.namespace
-          pod_label := get_pod_label(input.review.object)
-          policies := data.inventory.namespace[ns]["networking.k8s.io/v1"]["NetworkPolicy"]
-          pod_policies := [p |
-            p := policies[_]
-            match_policies(pod_label, p.spec.podSelector)
-            ]
-          count(pod_policies) == 0
-          msg := sprintf("The pod '%v' must have a network policy assigned", [object.get(input.review.object.metadata, "name", input.review.object.metadata.generateName)])
-        }
+       is_default_deny(spec) {
+         object.get(spec, "podSelector", {}) == {}
+         types := object.get(spec, "policyTypes", [])
+         has_item(types, "Ingress")
+         has_item(types, "Egress")
+       }
 
-        get_pod_label(obj) = label {
-          obj.kind == "Pod"
-          label := obj.metadata.labels
-        }
-
-        get_pod_label(obj) = label {
-          label := obj.spec.template.metadata.labels
-        }
-
-        match_policies(labels, selector) {
-          object.get(selector, "matchLabels", {}) == {}
-        }
-
-        match_policies(labels, selector) {
-          ml := object.get(selector, "matchLabels", {})
-          count(ml) > 0
-          count({key | labels[key] == ml[key]}) == count(ml)
-        }
+       has_item(arr, item) {
+         arr[_] == item
+       }
 ```
   **[See Constraint](k8s/opa_gatekeeper/02-constraints/network_policy_constraint.yaml)**
 
@@ -465,7 +449,7 @@ spec:
         kind: "NetworkPolicy"
 ```
 
-### I validated all these rules by applying a non complaint pod
+#### I validated all these rules by applying a non complaint pod
 
 ![opa gatekeeper violation](screenshots/phase1/opa_gatekeeper_violation.png)
 
@@ -481,7 +465,7 @@ Following the principle of least privilege, I only excluded the falco namespace 
 
 I also did not label the falco namespace with PSA Restricted for the same reasons because the restricted profile would block Falco's privileged containers at admission. Instead, I used OPA Gatekeeper policy exclusions that is more granular.
 
-### Falco Custom Rules and Macros
+#### Falco Custom Rules and Macros
 
 - *outbound macro:* I rewrote this macro rather than using the default because the default Falco outbound macro explicitly excludes all RFC1918 private IP ranges. This means the default macro would ignore every connection within the Kubernetes cluster since all pod and service IPs fall in RFC1918 space. I removed the RFC1918 exclusion and replaced it with a loopback exclusion fd.net != "127.0.0.0/8" to keep health check connections to 127.0.0.1 out of scope while making sure all real cluster traffic is monitored.
 
@@ -648,7 +632,7 @@ View the complete file above
 
 Falco ingress allows no traffic because it does not need any incoming traffic, egress allows DNS for name resolutions, 443/TCP for falcoctl rule updates and falco to reach API server for enrinching its alerts with Kubernetes metadata, and then 2801/TCP to sidekick pod label for falco to reach Sidekick. 
 
-Sidekick ingress allows 2801/TCP from Falco pod label only, which will prevent any other pod from sending fake alerts to falsely trigger pod deletions. Sidekick egress allows DNS and 443/TCP in order to reach the Kubernetes API for pod deletion calls.
+Sidekick ingress allows 2801/TCP from Falco pod label only, which will prevent any other pod from sending fake alerts to falsely trigger pod deletions. Sidekick egress allows DNS and 8443/TCP in order to reach the Kubernetes API for pod deletion calls.
 
 I did not restrict 443 egress for Falco pod by destination IP because falcoctl downloads rule updates from ghcr.io which sits behind a CDN with dynamic IPs. On EKS, I will either integrate FQDN using the CNI or I will route through an egress proxy with Security Group control to prevent an attacker who compromised the Falco pod from exfiltrating data over HTTPS to any destination.
 
@@ -669,4 +653,103 @@ I spent time trying to get Falco Sidekick's automated pod deletion working on Mi
 
 - Falco's ConfigMap showed that the http_output is enabled with the correct Sidekick URL. The kubernetesPodDelete settings in values.yaml were initially not being passed through to the Sidekick container via the generated Secret as expected. I worked around this by using extraEnv to set the environment variables directly, and I confirmed   that the variables reached the pod. But even with that resolved, sidekick was still not acting on the critical alerts I triggered. I removed the default deny NetworkPolicy temporarily, removed the pod selector restriction on port 2801 egress but none of these resolved the issue.
 
+### Vault and External Secrets Operator
 
+Although I stored the credentials for the application pods as manually created Kubernetes Secrets which follows the security principle of not hardcoding them in manifests, it is still a risk because anyone with kubectl get secret access in the production namespace can read the database password in plain base64. There is no audit trail of who accessed what, no automatic rotation, and no way to revoke access without manually deleting and recreating secrets. I solved this by moving the credentials out of Kubernetes entirely and into Vault, with the External Secrets Operator acting as the bridge between them.
+
+Vault stores secrets encrypted at rest with a full audit log of every read, write, and authentication event. It follows the peinciple of least privilege because acess is controlled by policies that restrict exactly which paths a client can read.
+
+
+I implemented ESO as the only client that can connect directly to Vault. I chose ESO  to completely isolate application pods from Vault at runtime. Neither of the pods hold Vault tokens, can authenticate to Vault, or have any knowledge of the secrets backend; they read normal Kubernetes Secrets that ESO manages on their behalf. This eliminates the risk of Vault token being exposed through application vulnerabilities. It also removes the need for Vault Agent sidecars in every pod, and enforces a strict separation between infrastructure secret management and application runtime. 
+
+I created an ESO policy that grants ESO read access only to the production secret path. ESO cannot write to Vault, cannot read secrets from other paths, and cannot modify policies or roles.
+
+```hcl
+path "secret/data/production/*" {
+  capabilities = ["read"]
+}
+```
+
+I created a vault role for ESO. The Vault role defines which Kubernetes identity is allowed to authenticate and what policy they receive. Only the eso-sa ServiceAccount from the eso namespace can authenticate using this role. I configured a 1 hour token TTL so that even if a token were somehow intercepted, it will expire quickly and cannot be reused indefinitely.
+```bash
+vault write auth/kubernetes/role/eso \
+  bound_service_account_names=eso-sa \
+  bound_service_account_namespaces=eso \
+  policies=eso-policy \
+  token_ttl=1h
+```
+
+I configured ESO with a dedicated ServiceAccount, namespaced SecretStore, and a restrictive NetworkPolicy that limits its egress to Vault and the Kubernetes API only.
+
+#### Dedicated ServiceAccounts for ESO and Vault
+I created dedicated service accounts for ESO and Vault instead of using the one created by Helm because ServiceAccounts created by Helm can be modified during upgrades which can silently apply changes made by chart maintainers without any review. This can lead to a privilege creep that will be invisible. Also, running helm uninstall will delete everything Helm owns including the ServiceAccount. Any Vault role bound to that identity would be broken and would require manual rebuilding.
+
+The ServiceAccounts are intentionally empty with no Kubernetes API permissions. The vault-server-binding ClusterRoleBinding created by the Vault Helm chart grants Vault's ServiceAccount the system:auth-delegator for TokenReview calls.
+
+#### Network policy for ESO and Vault
+I implemented default deny for vault and eso namespaces. I then allowed traffic following the principle of least privilege. For vault, I configured ingress on 8200/TCP for ESO (restricted to eso namespace and pod label only) and 8081 TCP for readiness probe. Egress to 53 TCP/UDP for DNS resolution and 8443/TCP to Kubernetes API calls. 
+
+I seperated ESO NetworkPolicy per component; controller, webhook, and certcontroller. For ESO Controller, egress on 53 UDP/TCP, 8200 TCP to Vault API (restricted to vault namespace and pod label only), Port 443/8443 TCP  for Kubernetes API for TokenReview and resource watching. ESO Webhook ingress: 10250 TCP for Kubernetes API server admission calls, 8081 TCP for readiness probe. ESO CertController egress: 53 UDP/TCP for DNS and 443/8443 TCP for Kubernetes API for ValidatingWebhookConfiguration updates.
+
+
+#### SecretStore and ExternalSecret
+I configured the SecretStore which tells ESO where Vault is and how to authenticate. I configured it to live in the production namespace and scoped it to application workloads only. A namespaced SecretStore cannot be used by other namespaces, which prevents a compromised pod in a different namespace from leveraging it to read production secrets.
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: vault-secret-store
+  namespace: production
+spec:
+  provider:
+    vault:
+      server: "http://vault.vault.svc.cluster.local:8200"
+      path: "secret"
+      version: "v2"
+      auth:
+        kubernetes:
+          mountPath: "kubernetes"
+          role: "eso"
+```
+
+I also configured the ExternalSecret `mariadb-secret-eso` that will be created by ESO which contains the credential fields synced from Vault. I enabled a refreshInterval of 1h so that ESO polls Vault every hour. If the password is rotated in Vault, mariadb-secret-eso will be updated within the hour automatically and it will not require the pods to restarts restart.
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: mariadb-external-secret
+  namespace: production
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-secret-store
+    kind: SecretStore
+  target:
+    name: mariadb-secret-eso
+    creationPolicy: Owner
+  data:
+    - secretKey: root-password
+      remoteRef:
+        key: production/mariadb
+        property: root-password
+    - secretKey: db-password
+      remoteRef:
+        key: production/mariadb
+        property: db-password
+    - secretKey: db-user
+      remoteRef:
+        key: production/mariadb
+        property: db-user
+    - secretKey: healthcheck-password
+      remoteRef:
+        key: production/mariadb
+        property: healthcheck-password
+```
+
+I then updated both MariaDB and DVWA manifests to reference mariadb-secret-eso instead of the manually created mariadb-secret. I deleted the pods to confirm they can sync thier secrets from `mariadb-secret-eso`.
+
+#### Validating ESO Capability during Vault Unavailability
+
+To test that ESO correctly caches synced secrets as real Kubernetes Secret objects stored in etcd. I scaled down Vault pod to 0 and deleted MariaDB to simulate a restart. MariaDB succesfully read the cached mariadb-secret-eso from etcd and restarted without any Vault connection.
