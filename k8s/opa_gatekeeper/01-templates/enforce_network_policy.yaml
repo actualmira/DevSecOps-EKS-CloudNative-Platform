@@ -15,39 +15,23 @@ spec:
           ns := input.review.object.metadata.namespace
           policies := object.get(object.get(data.inventory.namespace, ns, {}), "networking.k8s.io/v1", {})
           networkpolicies := object.get(policies, "NetworkPolicy", {})
-          count(networkpolicies) == 0
-          msg := sprintf("Namespace '%v' does not have a network policy ", [ns])
+          valid_deny_policies := [p |
+            p := networkpolicies[_]
+            is_default_deny(p.spec)
+          ]
+          count(valid_deny_policies) == 0
+          msg := sprintf("Namespace '%v' does not have a network policy", [ns])
         }
 
-        violation[{"msg": msg}] {
-          ns := input.review.object.metadata.namespace
-          pod_label := get_pod_label(input.review.object)
-          policies := data.inventory.namespace[ns]["networking.k8s.io/v1"]["NetworkPolicy"]
-          pod_policies := [p |
-            p := policies[_]
-            match_policies(pod_label, p.spec.podSelector)
-            ]
-          count(pod_policies) == 0
-          msg := sprintf("The pod '%v' must have a network policy assigned", [object.get(input.review.object.metadata, "name", input.review.object.metadata.generateName)])
+        is_default_deny(spec) {
+          object.get(spec, "podSelector", {}) == {}
+          types := object.get(spec, "policyTypes", [])
+          has_item(types, "Ingress")
+          has_item(types, "Egress")
         }
 
-        get_pod_label(obj) = label {
-          obj.kind == "Pod"
-          label := obj.metadata.labels
-        }
-
-        get_pod_label(obj) = label {
-          label := obj.spec.template.metadata.labels
-        }
-
-        match_policies(labels, selector) {
-          object.get(selector, "matchLabels", {}) == {}
-        }
-
-        match_policies(labels, selector) {
-          ml := object.get(selector, "matchLabels", {})
-          count(ml) > 0
-          count({key | labels[key] == ml[key]}) == count(ml)
+        has_item(arr, item) {
+          arr[_] == item
         }
 
 

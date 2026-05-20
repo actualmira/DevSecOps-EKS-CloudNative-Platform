@@ -56,7 +56,8 @@ customRules:
         shell_procs and
         not proc.pname in (shell_procs) and
         not user.name = healthcheck and
-        not (container.image.repository = mariadb and proc.cmdline contains mysqladmin)
+        not (container.image.repository = "mariadb" and proc.cmdline contains "mysqladmin") and
+        not (container.image.repository = "hashicorp/vault" and proc.cmdline contains "vault status")
       output: "Shell spawned in container (user=%user.name container=%container.name image=%container.image.repository shell=%proc.name parent=%proc.pname cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)"
       priority: WARNING
       tags: [container, shell]
@@ -97,7 +98,8 @@ customRules:
         container and
         evt.type in (setuid, setgid) and
         not user.uid = 0 and
-        not (proc.name startswith runc and proc.cmdline contains init)
+        not (proc.name startswith runc and proc.cmdline contains init) and
+        not (container.image.repository = "hashicorp/vault" and proc.cmdline contains "vault status")
       output: "Privilege escalation syscall in container (user=%user.name uid=%user.uid container=%container.name image=%container.image.repository syscall=%evt.type cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)"
       priority: CRITICAL
       tags: [syscall, privilege_escalation]
@@ -133,9 +135,6 @@ customRules:
 falcosidekick:
   enabled: true
   replicaCount: 1
-  serviceAccount:
-    create: false
-    name: falco-sidekick
   resources:
     requests:
       cpu: "10m"
@@ -146,6 +145,9 @@ falcosidekick:
   webui:
     enabled: false
   config:
+    debug: true
+    stdout:
+      enabled: true
     extraEnv:
       - name: KUBERNETESPODDELETE_ENABLED
         value: "true"

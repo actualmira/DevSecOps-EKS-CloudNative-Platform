@@ -1,0 +1,109 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eso-default-deny
+  namespace: eso
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eso-controller-np
+  namespace: eso
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: external-secrets
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 8081
+          protocol: TCP
+  egress:
+    - ports:
+        - port: 53
+          protocol: TCP
+        - port: 53
+          protocol: UDP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vault
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vault
+      ports:
+        - port: 8200
+          protocol: TCP
+    - ports:
+        - port: 8443
+          protocol: TCP
+        - port: 443
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eso-webhook-np
+  namespace: eso
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: external-secrets-webhook
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 10250
+          protocol: TCP
+    - ports:
+        - port: 8081
+          protocol: TCP
+  egress:
+    - ports:
+        - port: 53
+          protocol: TCP
+        - port: 53
+          protocol: UDP
+    - ports:
+        - port: 8443
+          protocol: TCP
+        - port: 443
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eso-certcontroller-np
+  namespace: eso
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: external-secrets-cert-controller
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 8081
+          protocol: TCP
+  egress:
+    - ports:
+        - port: 53
+          protocol: TCP
+        - port: 53
+          protocol: UDP
+    - ports:
+        - port: 8443
+          protocol: TCP
+        - port: 443
+          protocol: TCP

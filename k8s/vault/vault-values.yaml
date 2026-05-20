@@ -1,0 +1,73 @@
+global:
+  tlsDisable: true
+
+injector:
+  enabled: false
+
+csi:
+  enabled: false
+
+ui:
+  enabled: false
+
+server:
+  serviceAccount:
+    create: false
+    name: vault
+
+  authDelegator:
+    enabled: true
+
+  dev:
+    enabled: true
+    devRootToken: "root"
+
+  dataStorage:
+    enabled: false
+
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+
+  volumes:
+    - name: tmp
+      emptyDir: {}
+
+  volumeMounts:
+    - name: tmp
+      mountPath: /tmp
+
+  statefulSet:
+    securityContext:
+      pod:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      container:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+
+  livenessProbe:
+    enabled: true
+    failureThreshold: 5
+    initialDelaySeconds: 120
+    periodSeconds: 30
+    timeoutSeconds: 10
+
+  readinessProbe:
+    enabled: true
+    failureThreshold: 5
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 10
+
