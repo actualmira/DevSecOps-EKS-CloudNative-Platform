@@ -41,7 +41,7 @@ Implement and validate the neccessary security controls on minikube before provi
 
 In order to fully understand the whole security architecture, I did threat modeling first, with that I could model every component including actors, data flows, processes, and data stores. This is important because it helps me understand what I’m building, what can go wrong, and how it can be mitigated which drives every architectural decision. This is a shift left security because it identifies and mitigates threats at design time rather than discovering them after deployment.
 
-In this architecture I implemented a multi-environment deployment through Terraform workspaces. Due to cost constraints, the dev and production workspaces will not run silmutaneously. I will validate infrastructure changes in the dev workspace first, then promote to production using Terraform apply with a manual approval gate before destroying the dev workspace. This will ensure no untested or unreviewed infrastructure change reaches production directly. 
+In this architecture I will implement a multi-environment deployment through Terraform workspaces. Due to cost constraints, the dev and production workspaces will not run silmutaneously. I will validate infrastructure changes in the dev workspace first, then promote to production using Terraform apply with a manual approval gate before destroying the dev workspace. This will ensure no untested or unreviewed infrastructure change reaches production directly. 
 
 This threat model covers 47 threats across all six STRIDE categories applicable to this architecture. I applied DREAD scoring for risk quantification and NIST CSF mapping for compliance alignment. I did a risk analysis with mitigated risks, residual risks and accepted gaps documented.
 
@@ -245,7 +245,7 @@ By default MariaDB grants the application user full privileges on the database. 
 I restricted Root user to localhost only so that all database administration will require kubectl exec into the pod, which is logged on Kubernetes audit logs. This will prevent the risk of if port 3306 were ever accidentally exposed through a misconfigured NetworkPolicy or a cloud security group, an attacker cannot authenticate directly as root from outside the cluster.
 
 ### ConfigMap and manifest tampering
-At this stage, anyone with kubectl write access to the production namespace can apply any manifest including creating or modifying ConfigMaps. The current control is Git branch protection with GPG-signed commits, Pod ServiceAccounts having zero API permissions. I intend to close the gap as well by applying Cosign and OPA Gatekeeper signature validation alongside IAM-scoped kubectl access.
+At this stage, anyone with kubectl write access to the production namespace can apply any manifest including creating or modifying ConfigMaps. The current control is Git branch protection with GPG-signed commits, Pod ServiceAccounts having zero API permissions. I intend to close the gap by implementing IAM scoped kubectl access alongside OPA Gatekeeper constraint to reject manually created or updated ConfigMaps and strictly force all manifest deployment or edit to go through GitOps pipeline.
 
 ### StatefulSet for MariaDB and Deployment for DVWA
 
@@ -282,8 +282,7 @@ Minikube's default CNI does not enforce NetworkPolicy so I restarted minikube wi
 
 
 ### NetworkPolicy label spoofing
-The Network Policies select pods by label, this means that any pod created in the production namespace with a matching label will inherit the same network access rules including egress to MariaDB on port 3306. The current control is RBAC for both pod ServiceAccounts have zero API permissions, so an attacker cannot create malicious pods from a compromised container through the Kubernetes API using its own token but someone with kubectl access can. This is a gap at this stage which I will mitigate in future stages with Cosign image signing and OPA Gatekeeper admission constraint that will validate the signatures and enforce blocking of any pod with an unsigned image regardless of what labels it carries.
-
+The Network Policies select pods by label, this means that any pod created in the production namespace with a matching label will inherit the same network access rules including egress to MariaDB on port 3306. The current control is RBAC, both pod ServiceAccounts have zero API permissions, so an attacker cannot create malicious pods from a compromised container through the Kubernetes API using its token but someone with kubectl access can. This is a gap at this stage which I will mitigate in future stages with Cosign image signing and OPA Gatekeeper admission constraint that will block any pod with an unsigned image regardless of what labels it carries. I will also mitigate the risk of maliciously deploying the exact signed image by using IAM scoped kubectl access to prevent unauthorized kubectl access.
 
 ### OPA Gatekeeper Policy with Rego
 
