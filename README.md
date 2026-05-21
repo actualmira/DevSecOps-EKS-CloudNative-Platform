@@ -287,7 +287,7 @@ The Network Policies select pods by label, this means that any pod created in th
 
 ### OPA Gatekeeper Policy with Rego
 
-I installed OPA Gatekeeper, wrote custom ConstraintTemplates using Rego for the kubernetes security controls I enforced, this serves as a second layer of control acting at the admission level. I configured all ConstraintTemplates to target both naked Pods and controller resources so that every resource is intercepted irrespective of how it is applied. 
+I installed OPA Gatekeeper, wrote custom ConstraintTemplates using Rego for the kubernetes security controls I enforced, this serves as an admission control policy as code to enforce security requirements before any workload can be admitted into the cluster. I configured all Constraints to target both naked Pods and controller resources so that every resource is intercepted irrespective of how it is applied. 
 
 - **[EnforceNonRootUser](k8s/opa_gatekeeper/01-templates/enforce_non_root.yaml)** 
 
@@ -565,15 +565,9 @@ I triggered the rules to confirm that falco is correctly firing the alerts.
 
 I deployed Falco sidekick for automated threat response on critical cases
 
-- *[Custom Service Account:](k8s/falco/falco-sk-rbac.yaml)*  I created a custom ServiceAccount rather than using the default Helm ServiceAccount for Sidekick which uses a ClusterRoleBinding giving it cluster-wide permissions. Instead, I used a ClusterRole so that I can define the permission once but bound it with a namespace scoped RoleBinding in the production namespace only. This means Sidekick can delete pods in production namespace only but cannot in kube-system, falco, or gatekeeper-system namespaces to prevent it from being abused if the Sidekick pod is compromised. I also configured allowedNamespaces for only production namespace in Sidekick's own configuration as a second level filter. As I add new application namespaces in later phases, I will add a RoleBinding per namespace where neccessary and update allowedNamespaces.
+- I configured a ClusterRole for sidekick serviceaccount so that I can define the permission once but bound it with a namespace scoped RoleBinding in the production namespace only. This means Sidekick can delete pods in production namespace only but cannot in kube-system, falco, or gatekeeper-system namespaces to prevent it from being abused if the Sidekick pod is compromised. I also configured allowedNamespaces for only production namespace in Sidekick's config as a second level filter. As I add new application namespaces in later phases, I will add a RoleBinding per namespace where neccessary and update allowedNamespaces.
 
 ```yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: falco-sidekick
-  namespace: falco
----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -632,7 +626,7 @@ View the complete file above
 
 Falco ingress allows no traffic because it does not need any incoming traffic, egress allows DNS for name resolutions, 443/TCP for falcoctl rule updates and falco to reach API server for enrinching its alerts with Kubernetes metadata, and then 2801/TCP to sidekick pod label for falco to reach Sidekick. 
 
-Sidekick ingress allows 2801/TCP from Falco pod label only, which will prevent any other pod from sending fake alerts to falsely trigger pod deletions. Sidekick egress allows DNS and 8443/TCP in order to reach the Kubernetes API for pod deletion calls.
+Sidekick ingress allows 2801/TCP from Falco pod label only, which will prevent any other pod from sending fake alerts to falsely trigger pod deletions. Sidekick egress allows DNS and 443/TCP in order to reach the Kubernetes API for pod deletion calls.
 
 I did not restrict 443 egress for Falco pod by destination IP because falcoctl downloads rule updates from ghcr.io which sits behind a CDN with dynamic IPs. On EKS, I will either integrate FQDN using the CNI or I will route through an egress proxy with Security Group control to prevent an attacker who compromised the Falco pod from exfiltrating data over HTTPS to any destination.
 
@@ -651,16 +645,31 @@ I spent time trying to get Falco Sidekick's automated pod deletion working on Mi
 ![Sidekick Connection](screenshots/phase1/falco-falcosidekick_connection.png)
 
 
-- Falco's ConfigMap showed that the http_output is enabled with the correct Sidekick URL. The kubernetesPodDelete settings in values.yaml were initially not being passed through to the Sidekick container via the generated Secret as expected. I worked around this by using extraEnv to set the environment variables directly, and I confirmed   that the variables reached the pod. But even with that resolved, sidekick was still not acting on the critical alerts I triggered. I removed the default deny NetworkPolicy temporarily, removed the pod selector restriction on port 2801 egress but none of these resolved the issue.
+- Falco's ConfigMap showed that the http_output is enabled with the correct Sidekick URL. The kubernetesPodDelete settings in values.yaml were initially not being passed through to the Sidekick container via the generated Secret as expected. I worked around this by using extraEnv to set the environment variables directly, and I confirmed   that the variables reached the pod. But even with that resolved, sidekick was still not acting on the critical alerts I triggered. I confirmed that sidekick service account has pod deletion permission in the production namespace.
+
+I enabled debug and stdout for sidekick in order to view debug logs on the terminal. This confirmed that sidekick was recieving the critical alerts from falco but not acting on it. I also removed the default deny NetworkPolicy temporarily but none of these resolved the issue.
+
+![sidekick-debug.png](screenshots/phase1/sidekick-debug.png)
+
+On EKS, I will validate the full automated response chain with proper observability into the deletion attempt including Kubernetes audit logs showing the API call from the Sidekick ServiceAccount, which would confirm whether the call is being made and whether it is succeeding or failing.
 
 ### Vault and External Secrets Operator
 
-Although I stored the credentials for the application pods as manually created Kubernetes Secrets which follows the security principle of not hardcoding them in manifests, it is still a risk because anyone with kubectl get secret access in the production namespace can read the database password in plain base64. There is no audit trail of who accessed what, no automatic rotation, and no way to revoke access without manually deleting and recreating secrets. I solved this by moving the credentials out of Kubernetes entirely and into Vault, with the External Secrets Operator acting as the bridge between them.
+Although I stored the credentials for the application pods as manually created Kubernetes Secrets which follows the security principle of not hardcoding them in manifests, it is still a risk because anyone with kubectl get secret access in the production namespace can read the database password in plain base64. There is no audit trail of who accessed what, no automatic rotation, and no way to revoke access without manually deleting and recreating secrets. I solved this by moving the credentials out of Kubernetes entirely and into [Vault](k8s/vault/vault-values.yaml), with the [External Secrets Operator](k8s/eso/eso-values.yaml) acting as the bridge between them.
 
 Vault stores secrets encrypted at rest with a full audit log of every read, write, and authentication event. It follows the peinciple of least privilege because acess is controlled by policies that restrict exactly which paths a client can read.
 
 
 I implemented ESO as the only client that can connect directly to Vault. I chose ESO  to completely isolate application pods from Vault at runtime. Neither of the pods hold Vault tokens, can authenticate to Vault, or have any knowledge of the secrets backend; they read normal Kubernetes Secrets that ESO manages on their behalf. This eliminates the risk of Vault token being exposed through application vulnerabilities. It also removes the need for Vault Agent sidecars in every pod, and enforces a strict separation between infrastructure secret management and application runtime. 
+
+```bash
+vault auth enable kubernetes
+
+vault write auth/kubernetes/config \
+  kubernetes_host="https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT" \
+  kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
+  issuer="https://kubernetes.default.svc.cluster.local"
+```
 
 I created an ESO policy that grants ESO read access only to the production secret path. ESO cannot write to Vault, cannot read secrets from other paths, and cannot modify policies or roles.
 
@@ -670,7 +679,7 @@ path "secret/data/production/*" {
 }
 ```
 
-I created a vault role for ESO. The Vault role defines which Kubernetes identity is allowed to authenticate and what policy they receive. Only the eso-sa ServiceAccount from the eso namespace can authenticate using this role. I configured a 1 hour token TTL so that even if a token were somehow intercepted, it will expire quickly and cannot be reused indefinitely.
+I created a vault role for ESO. The vault role defines which Kubernetes identity is allowed to authenticate and what policy they receive. Only the eso-sa ServiceAccount from the eso namespace can authenticate using this role. I configured a 1 hour token TTL so that even if a token were somehow intercepted, it will expire quickly and cannot be reused indefinitely.
 ```bash
 vault write auth/kubernetes/role/eso \
   bound_service_account_names=eso-sa \
@@ -682,18 +691,18 @@ vault write auth/kubernetes/role/eso \
 I configured ESO with a dedicated ServiceAccount, namespaced SecretStore, and a restrictive NetworkPolicy that limits its egress to Vault and the Kubernetes API only.
 
 #### Dedicated ServiceAccounts for ESO and Vault
-I created dedicated service accounts for ESO and Vault instead of using the one created by Helm because ServiceAccounts created by Helm can be modified during upgrades which can silently apply changes made by chart maintainers without any review. This can lead to a privilege creep that will be invisible. Also, running helm uninstall will delete everything Helm owns including the ServiceAccount. Any Vault role bound to that identity would be broken and would require manual rebuilding.
+I created dedicated service accounts for [ESO](k8s/eso/eso-sa.yaml) and [Vault](k8s/vault/vault-rbac.yaml) instead of using the one created by Helm because ServiceAccounts created by Helm can be modified during upgrades which can silently apply changes made by chart maintainers without any review. This can lead to a privilege creep that will be invisible. Also, running helm uninstall will delete everything Helm owns including the ServiceAccount. Any Vault role bound to that identity would be broken and would require manual rebuilding.
 
 The ServiceAccounts are intentionally empty with no Kubernetes API permissions. The vault-server-binding ClusterRoleBinding created by the Vault Helm chart grants Vault's ServiceAccount the system:auth-delegator for TokenReview calls.
 
 #### Network policy for ESO and Vault
-I implemented default deny for vault and eso namespaces. I then allowed traffic following the principle of least privilege. For vault, I configured ingress on 8200/TCP for ESO (restricted to eso namespace and pod label only) and 8081 TCP for readiness probe. Egress to 53 TCP/UDP for DNS resolution and 8443/TCP to Kubernetes API calls. 
+I implemented default deny for vault and eso namespaces. I then allowed traffic following the principle of least privilege. For [vault](k8s/vault/vault-np.yaml), I configured ingress on 8200/TCP for ESO (restricted to eso namespace and pod label only) and 8081 TCP for readiness probe. Egress to 53 TCP/UDP for DNS resolution and 8443/TCP for Kubernetes API calls. 
 
-I seperated ESO NetworkPolicy per component; controller, webhook, and certcontroller. For ESO Controller, egress on 53 UDP/TCP, 8200 TCP to Vault API (restricted to vault namespace and pod label only), Port 443/8443 TCP  for Kubernetes API for TokenReview and resource watching. ESO Webhook ingress: 10250 TCP for Kubernetes API server admission calls, 8081 TCP for readiness probe. ESO CertController egress: 53 UDP/TCP for DNS and 443/8443 TCP for Kubernetes API for ValidatingWebhookConfiguration updates.
+I seperated [ESO NetworkPolicy](k8s/eso/eso-np.yaml) per component; controller, webhook, and certcontroller. For ESO Controller, egress on 53 UDP/TCP, 8200/TCP to Vault API (restricted to vault namespace and pod label only), Port 443/TCP  for Kubernetes API for TokenReview and resource watching. ESO Webhook ingress: 10250 TCP for Kubernetes API server admission calls, 8081 TCP for readiness probe. ESO CertController egress: 53 UDP/TCP for DNS, 443/TCP to Kubernetes API for ValidatingWebhookConfiguration updates and ingress on 8081 TCP for readiness probe.
 
 
 #### SecretStore and ExternalSecret
-I configured the SecretStore which tells ESO where Vault is and how to authenticate. I configured it to live in the production namespace and scoped it to application workloads only. A namespaced SecretStore cannot be used by other namespaces, which prevents a compromised pod in a different namespace from leveraging it to read production secrets.
+I configured the [SecretStore](k8s/eso/production-secret-store.yaml) which tells ESO where Vault is and how to authenticate. I configured it to live in the production namespace and scoped it to application workloads only. A namespaced SecretStore cannot be used by other namespaces, which prevents a compromised pod in a different namespace from leveraging it to read production secrets.
 
 ```yaml
 apiVersion: external-secrets.io/v1
@@ -713,14 +722,9 @@ spec:
           role: "eso"
 ```
 
-I also configured the ExternalSecret `mariadb-secret-eso` that will be created by ESO which contains the credential fields synced from Vault. I enabled a refreshInterval of 1h so that ESO polls Vault every hour. If the password is rotated in Vault, mariadb-secret-eso will be updated within the hour automatically and it will not require the pods to restarts restart.
+I also configured the [ExternalSecret](k8s/eso/production-external-secret.yaml) `mariadb-secret-eso` that will be created by ESO which contains the credential fields synced from Vault. I enabled a refreshInterval of 1h so that ESO polls Vault every hour. If the password is rotated in Vault, `mariadb-secret-eso` will be updated within the hour automatically and it will not require the pods to restart.
 
 ```yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: mariadb-external-secret
-  namespace: production
 spec:
   refreshInterval: 1h
   secretStoreRef:
@@ -748,8 +752,16 @@ spec:
         property: healthcheck-password
 ```
 
-I then updated both MariaDB and DVWA manifests to reference mariadb-secret-eso instead of the manually created mariadb-secret. I deleted the pods to confirm they can sync thier secrets from `mariadb-secret-eso`.
+I then updated both MariaDB and DVWA manifests to reference mariadb-secret-eso instead of the manually created mariadb-secret. I deleted the manually created kubernetes secret and the pods to confirm they can sync thier secrets from `mariadb-secret-eso`.
+
+![secret_store_running](screenshots/phase1/secret_store_running.png)
+*secret created and synced*
+
+![pods_after_eso_secret](screenshots/phase1/pods_after_eso_secret.png)
+*pods successfully started and running*
 
 #### Validating ESO Capability during Vault Unavailability
 
 To test that ESO correctly caches synced secrets as real Kubernetes Secret objects stored in etcd. I scaled down Vault pod to 0 and deleted MariaDB to simulate a restart. MariaDB succesfully read the cached mariadb-secret-eso from etcd and restarted without any Vault connection.
+
+![pods_after_vault_turnoff](screenshots/phase1/pods_after_vault_turnoff.png)
