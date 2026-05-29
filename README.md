@@ -695,9 +695,9 @@ I created dedicated service accounts for [ESO](k8s/eso/eso-sa.yaml) and [Vault](
 The ServiceAccounts are intentionally empty with no Kubernetes API permissions. The vault-server-binding ClusterRoleBinding created by the Vault Helm chart grants Vault's ServiceAccount the system:auth-delegator for TokenReview calls.
 
 #### Network policy for ESO and Vault
-I implemented default deny for vault and eso namespaces. I then allowed traffic following the principle of least privilege. For [vault](k8s/vault/vault-np.yaml), I configured ingress on 8200/TCP for ESO (restricted to eso namespace and pod label only) and 8081 TCP for readiness probe. Egress to 53 TCP/UDP for DNS resolution and 8443/TCP for Kubernetes API calls. 
+I implemented default deny for vault and eso namespaces. I then allowed traffic following the principle of least privilege. For [vault](k8s/vault/vault-np.yaml), I configured ingress on 8200/TCP for ESO (restricted to eso namespace and pod label only). Egress to 53 TCP/UDP for DNS resolution and 8443/TCP for Kubernetes API calls. 
 
-I seperated [ESO NetworkPolicy](k8s/eso/eso-np.yaml) per component; controller, webhook, and certcontroller. For ESO Controller, egress on 53 UDP/TCP, 8200/TCP to Vault API (restricted to vault namespace and pod label only), Port 443/TCP  for Kubernetes API for TokenReview and resource watching. ESO Webhook ingress: 10250 TCP for Kubernetes API server admission calls, 8081 TCP for readiness probe. ESO CertController egress: 53 UDP/TCP for DNS, 443/TCP to Kubernetes API for ValidatingWebhookConfiguration updates and ingress on 8081 TCP for readiness probe.
+I seperated [ESO NetworkPolicy](k8s/eso/eso-np.yaml) per component; controller, webhook, and certcontroller. For ESO Controller, egress on 53 UDP/TCP, 8200/TCP to Vault API (restricted to vault namespace and pod label only), Port 443/TCP  for Kubernetes API for TokenReview and resource watching. ESO Webhook ingress: 10250 TCP for Kubernetes API server admission calls. ESO CertController egress: 53 UDP/TCP for DNS, 443/TCP to Kubernetes API for ValidatingWebhookConfiguration updates.
 
 
 #### SecretStore and ExternalSecret
