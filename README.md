@@ -212,10 +212,11 @@ livenessProbe:
   timeoutSeconds: 10
   failureThreshold: 3
 ```
+- I configured the readiness and liveness probes for MariaDB to use -h 127.0.0.1 rather than -h localhost. This is because when -h localhost is used, MariaDB connects via a Unix socket and applies unix_socket authentication based on the Linux system user identity. Since the health check database user is not the system user, authentication fails regardless of the password. Using -h 127.0.0.1 forces TCP/IP, which always utilizes password authentication.
 
-- I configured the readiness and liveness probes for mariadb to use -h 127.0.0.1 rather than -h localhost. This is because when -h localhost is used, MariaDB connects via Unix socket and applies unix_socket authentication based on the Linux system user identity. Since the healthcheck database user is not the system user, authentication fails regardless of password. Using -h 127.0.0.1 forces TCP which always uses password authentication. I used the IDENTIFIED VIA mysql_native_password clause in the init script to ensure password authentication is used regardless of MariaDB's defaults.
+- However, simply creating the user with an IDENTIFIED VIA mysql_native_password clause alone was not sufficient because the initial database provisioning defaults new local accounts to the unix_socket authentication plugin, bypassing the password validation required by the probes. I resolved this by using a shell Heredoc file during the initialization stage to execute an explicit ALTER USER statement immediately after creation, this forcefully resets the health check user's authentication plugin back to mysql_native_password.
 
-- However this alone was not sufficient because MariaDB's internal mysql_secure_installation equivalent runs after the init script and resets the authentication plugin for local users to unix_socket which overrides the plugin set during user creation. I fixed this by using a *Heredoc file* for the init script in order to control the sequence, then I added an explicit ALTER USER statement in the init script which runs after mysql_secure_installation completes.
+- Also, to securely execute these administrative modifications during the init phase, I passed the root credentials through the MYSQL_PWD environment variable instead of using the standard -p command-line flag. This prevents exposing the plaintext credential to the host operating system's process table and restricts the secret strictly to the process environment memory space.
 
 ```yaml
 apiVersion: v1
@@ -224,9 +225,9 @@ metadata:
   name: mariadb-init
   namespace: production
 data:
-  healthcheck.sh: |
+  init.sh: |
     #!/bin/sh
-    mysql -u root -p"${MARIADB_ROOT_PASSWORD}" <<EOF
+    MYSQL_PWD="${MARIADB_ROOT_PASSWORD}" mysql -u root <<EOF
     CREATE USER IF NOT EXISTS 'healthcheck'@'127.0.0.1' IDENTIFIED BY '${HEALTHCHECK_PASSWORD}';
     ALTER USER 'healthcheck'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('${HEALTHCHECK_PASSWORD}');
     REVOKE ALL PRIVILEGES ON dvwa.* FROM '${MARIADB_USER}'@'%';
@@ -764,3 +765,50 @@ I then updated both MariaDB and DVWA manifests to reference mariadb-secret-eso i
 To test that ESO correctly caches synced secrets as real Kubernetes Secret objects stored in etcd. I scaled down Vault pod to 0 and deleted MariaDB to simulate a restart. MariaDB succesfully read the cached mariadb-secret-eso from etcd and restarted without any Vault connection.
 
 ![pods_after_vault_turnoff](screenshots/phase1/pods_after_vault_turnoff.png)
+
+![mariadb_secret_synced](screenshots/phase1/mariadb_secret_synced.png)
+
+
+## Phase 2: AWS Foundation
+
+### 2A: AWS Account Preparation
+
+**Cost Management**
+Before provisioning anything I configured billing alerts. Since I planned to destroy and recreate infrastructure daily to manage my AWS credits, I needed visibility into any unexpected charges. 
+
+**Terraform State**
+I created the DynamoDB table for state locking and the terraform state bucket. Because I planned to run terraform destroy at the end of every work day to save cost, I could not manage the S3 state bucket and DynamoDB lock table with Terraform. I created both manually through the AWS CLI so they survive daily destroy cycle. 
+
+I enabled versioning on the state bucket so I can recover from a corrupted state file or accidental delete. Because the state bucket stores secrets in plaintext and contains the inventory of the entire architecture, if someone has an unauthorized access to it, they can map my entire attack surface. So, I enabled public access block. 
+
+By default, AWS encrypts all s3 bucket at rest but it has a risk of anyone or application in my AWS account that has basic permission to read files from that S3 bucket being able to view the contents. So, I enabled the customer managed KMS. This will prevent someone who doesn’t have the permission to use the custom KMS key to decrypt the state files. It also provides an audit trail of every time terraform reads or writes to the state file. 
+
+I also created a dedicated terraform IAM user with AdministratorAccess rather than using root for any provisioning work. Root has unrestricted control over the entire account, using it for day to day work is a significant risk. I enabled MFA on the user and I also intend to convert the terraform IAM user to IAM role and configure the bucket policy to restrict access to the Terraform IAM role only.
+
+**CloudTrail**
+I configured cloudtrail writing to a dedicated s3 bucket to provide an audit trail of every API call made. 
+
+I enabled object lock on COMPLIANCE mode to prevent anyone including root to delete or modify a log file during the retention period. This will prevent an attacker from covering up or deleting their trails. Because WORM doesn’t protect from tampering while on transit, I also enabled log file validation to create a cryptographic hash of every file which detects if the file was modified before reaching the bucket. I used 30 days because this is a dev environment. In production I’d use a longer retention period and also Glacier for archiving to cut storage cost significantly.
+
+I scoped the bucket policy to my specific trail, this will prevent denial of service through storage exhaustion, or a malicious attacker hiding his activities by polluting the logs.
+
+### 2B: Network Foundation
+**Three-Tier VPC**
+I built the VPC with three subnet tiers across three availability zones. The public subnets route to the Internet Gateway, private subnets route to the NAT Gateway, and the isolated subnets have no internet route at all.
+
+This network segmentation establishes a clear boundary between the public facing workloads and private internal workloads. The load balancer will live in the public subnet and will be the only resource that has direct access from the internet while the application pods will live in the private subnet. The database and vault which hold the raw data and the master cryptographic encryption keys will live in the isolated subnet. This eliminates the risk of making outbound connection in the case of a compromise. It also forces a strict air gapped model where every update will go through the internal ECR registry and deployed through the secure interface VPC endpoints.
+
+I provisioned one NAT gateway in just one availability zone for cost management. In a production environment, each AZ should have its own NAT gateway for high availability.
+
+**Security Groups and NACL**
+I created three security groups for the ALB, application nodes, and isolated nodes.
+
+I restricted the ALB SG ingress traffic to only port 443. This ensures that no unencrypted traffic can reach the application  which eliminates the risk of session cookie theft and credential interception in transit. 
+
+No ALB to application node rules yet, I deliberately left these out because the network path the ALB uses to reach EKS pods depends on the ingress controller configuration which does not exist yet, I will add the specific rules once I allocate the target port.
+
+The application node SG currently allow all protocols outbound. Because EKS needs various internal cluster ports that I cannot know in advance, when VPC Flow Logs capture ACCEPT records showing exactly what traffic are required, I will tighten this in future phase based on observed traffic.
+
+I allowed 3306 and 8200 traffic from the application node SG to the isolated node SG for database queries and eso accessing vault. On the isolated subnet, I also allowed 443 traffic to the private subnet for reaching VPC endpoints.
+
+For defense in depth in the isolated subnet, I configured a NACL. Even if a security group rule is accidentally misconfigured, the NACL blocks anything not originating from the private subnet range.
