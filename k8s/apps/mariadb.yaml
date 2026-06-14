@@ -11,9 +11,9 @@ metadata:
   name: mariadb-init
   namespace: production
 data:
-  healthcheck.sh: |
+  init.sh: |
     #!/bin/sh
-    mysql -u root -p"${MARIADB_ROOT_PASSWORD}" <<EOF
+    MYSQL_PWD="${MARIADB_ROOT_PASSWORD}" mysql -u root <<EOF
     CREATE USER IF NOT EXISTS 'healthcheck'@'127.0.0.1' IDENTIFIED BY '${HEALTHCHECK_PASSWORD}';
     ALTER USER 'healthcheck'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('${HEALTHCHECK_PASSWORD}');
     REVOKE ALL PRIVILEGES ON dvwa.* FROM '${MARIADB_USER}'@'%';
