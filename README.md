@@ -774,41 +774,70 @@ To test that ESO correctly caches synced secrets as real Kubernetes Secret objec
 ### 2A: AWS Account Preparation
 
 **Cost Management**
-Before provisioning anything I configured billing alerts. Since I planned to destroy and recreate infrastructure daily to manage my AWS credits, I needed visibility into any unexpected charges. 
+Before provisioning anything I configured billing alerts. Since I planned to destroy and recreate infrastructure daily to manage my AWS credits, I needed visibility into any unexpected charges. In production, this is critical because unmonitored cloud spend can lead to budget overruns. Cost anomaly detection specifically catches unusual spending patterns that total budget alerts miss which is vital because unexpected cost spikes are also a potential indicator of compromise like an attacker spinning up EC2 instances.
 
 **Terraform State**
-I created the DynamoDB table for state locking and the terraform state bucket. Because I planned to run terraform destroy at the end of every work day to save cost, I could not manage the S3 state bucket and DynamoDB lock table with Terraform. I created both manually through the AWS CLI so they survive daily destroy cycle. 
+I created the DynamoDB table for state locking and the terraform state bucket. Because I planned to run terraform destroy at the end of every work day to save cost, I could not manage the S3 state bucket and DynamoDB lock table with Terraform. I created both manually through the AWS CLI so they can survive daily destroy cycle. 
 
-I enabled versioning on the state bucket so I can recover from a corrupted state file or accidental delete. Because the state bucket stores secrets in plaintext and contains the inventory of the entire architecture, if someone has an unauthorized access to it, they can map my entire attack surface. So, I enabled public access block. 
+I enabled versioning on the state bucket so I can recover from a corrupted state file or accidental delete, and blocked public access because the state file stores the entire inventory of my architecture in plaintext and if someone has an unauthorized access to it, they can map my entire attack surface.
 
-By default, AWS encrypts all s3 bucket at rest but it has a risk of anyone or application in my AWS account that has basic permission to read files from that S3 bucket being able to view the contents. So, I enabled the customer managed KMS. This will prevent someone who doesn’t have the permission to use the custom KMS key to decrypt the state files. It also provides an audit trail of every time terraform reads or writes to the state file. 
+I enabled a customer managed KMS key rather than the default AWS managed encryption. The default encryption still allows anyone with basic S3 read permissions in my account to view the contents. With a CMK, even if someone gains S3 access, they cannot read the state file without also having permission to use the specific KMS key. It also provides an audit trail of every time terraform reads or writes to the state file. 
 
 I also created a dedicated terraform IAM user with AdministratorAccess rather than using root for any provisioning work. Root has unrestricted control over the entire account, using it for day to day work is a significant risk. I enabled MFA on the user and I also intend to convert the terraform IAM user to IAM role and configure the bucket policy to restrict access to the Terraform IAM role only.
 
 **CloudTrail**
-I configured cloudtrail writing to a dedicated s3 bucket to provide an audit trail of every API call made. 
+I configured [cloudtrail](terraform/modules/security/cloudtrail.tf) logging to a dedicated s3 bucket with a customer managed KMS key to provide an audit trail of every API call made. The KMS key grants decrypt permission only to the account root, an attacker who compromises S3 cannot be able to read the logs without also compromising the key. 
 
-I enabled object lock on COMPLIANCE mode to prevent anyone including root to delete or modify a log file during the retention period. This will prevent an attacker from covering up or deleting their trails. Because WORM doesn’t protect from tampering while on transit, I also enabled log file validation to create a cryptographic hash of every file which detects if the file was modified before reaching the bucket. I used 30 days because this is a dev environment. In production I’d use a longer retention period and also Glacier for archiving to cut storage cost significantly.
+I enabled object lock on GOVERNANCE mode to prevent the log files from being deleted during the retention period. I chose GOVERNANCE over COMPLIANCE, and a 30 days retention period because this is an active development environment and COMPLIANCE mode would make it impossible to recover from a configuration mistake since even root cannot override it. In production, I would use COMPLIANCE mode and a longer retention period (as well as Glacier for archiving to cut storage cost significantly) to prevent anyone including root to delete or modify a log file during the retention period. This will prevent an attacker from covering up or deleting their trails. 
+Because WORM doesn’t protect from tampering while on transit, I also enabled log file validation to create a cryptographic hash of every file which detects if the file was modified before reaching the bucket. 
 
-I scoped the bucket policy to my specific trail, this will prevent denial of service through storage exhaustion, or a malicious attacker hiding his activities by polluting the logs.
+I also scoped the bucket policy to my specific trail to prevent denial of service through storage exhaustion, or a malicious attacker hiding their activities by polluting the logs.
+
+*NOTE* I created one dedicated [KMS key](terraform/modules/security/kms.tf) per service throughout this project, this limits the blast radius because a compromise of one key will only expose that service's data and nothing else.
 
 ### 2B: Network Foundation
 **Three-Tier VPC**
-I built the VPC with three subnet tiers across three availability zones. The public subnets route to the Internet Gateway, private subnets route to the NAT Gateway, and the isolated subnets have no internet route at all.
+I built the [VPC](terraform/modules/network/vpc.tf) with three subnet tiers across three availability zones. The public subnets route to the Internet Gateway, private subnets route to the NAT Gateway, and the isolated subnets, although I intend to configure it to have no internet route at all, it currently routes through the NAT Gateway for EKS node provisioning because  without a default route, the managed node group is failing to provision even with VPC endpoints that cover all required AWS API calls.
 
-This network segmentation establishes a clear boundary between the public facing workloads and private internal workloads. The load balancer will live in the public subnet and will be the only resource that has direct access from the internet while the application pods will live in the private subnet. The database and vault which hold the raw data and the master cryptographic encryption keys will live in the isolated subnet. This eliminates the risk of making outbound connection in the case of a compromise. It also forces a strict air gapped model where every update will go through the internal ECR registry and deployed through the secure interface VPC endpoints.
+This network segmentation seperates the public facing workloads and private internal workloads. The load balancer will live in the public subnet and will be the only resource that has direct access from the internet while the application pods will live in the private subnet. The database and vault which hold the raw data and the master cryptographic encryption keys will live in the isolated subnet which will eliminate the risk of making outbound connection in the case of a compromise. It will also force a strict air gapped model where every update will go through the internal ECR registry and deployed through the secure interface VPC endpoints.
 
 I provisioned one NAT gateway in just one availability zone for cost management. In a production environment, each AZ should have its own NAT gateway for high availability.
 
-**Security Groups and NACL**
-I created three security groups for the ALB, application nodes, and isolated nodes.
+**Security Groups**
+I configured [security groups](terraform/modules/network/vpc.tf) for micro-segmentation. I restricted the ALB SG ingress traffic to only port 443. This ensures that no unencrypted traffic can reach the application which will eliminate the risk of session cookie being stolen or credentials being intercepted in transit. 
 
-I restricted the ALB SG ingress traffic to only port 443. This ensures that no unencrypted traffic can reach the application  which eliminates the risk of session cookie theft and credential interception in transit. 
+I currently left out the ALB-to-node rules because the network path the ALB uses to reach EKS pods depends on the ingress controller configuration which does not exist yet, I will add the specific rules once I allocate the target port.
 
-No ALB to application node rules yet, I deliberately left these out because the network path the ALB uses to reach EKS pods depends on the ingress controller configuration which does not exist yet, I will add the specific rules once I allocate the target port.
+The application and isolated node security groups currently restrict egress to only port 443. Because EKS needs various internal cluster ports that I cannot know in advance, when VPC Flow Logs capture what traffic are required, I will tighten this in future phase based on observed traffic.
 
-The application node SG currently allow all protocols outbound. Because EKS needs various internal cluster ports that I cannot know in advance, when VPC Flow Logs capture ACCEPT records showing exactly what traffic are required, I will tighten this in future phase based on observed traffic.
+**VPC Endpoints**
+I provisioned eight interface endpoints and one S3 gateway endpoint. With VPC endpoints, traffic stays entirely on AWS's private network and never touches the public internet, this eliminates the risk of intercepting API calls carrying credentials or sensitive metadata. My original intent was to place the endpoints only in the isolated subnet for Vault's KMS auto-unseal and ECR image pulls, but I discovered that once you create an interface endpoint with private DNS enabled, AWS automatically configures Route 53 Resolver rules that rewrite the service hostname for the entire VPC, not just the subnet the endpoint lives in. This means all nodes across every tier resolve to the enabled endpoint's private IP regardless of having a route to NAT Gateway, so I configured the endpoint security groups to allow traffic from both the private and isolated tiers.
 
-I allowed 3306 and 8200 traffic from the application node SG to the isolated node SG for database queries and eso accessing vault. On the isolated subnet, I also allowed 443 traffic to the private subnet for reaching VPC endpoints.
+I configured the KMS endpoint to have its own dedicated security group restricted to the isolated tier only. Since private DNS makes the KMS endpoint reachable from all tiers by default, scoping the security group to isolated tier ensures that only Vault's auto-unseal calls can actually reach it. 
 
-For defense in depth in the isolated subnet, I configured a NACL. Even if a security group rule is accidentally misconfigured, the NACL blocks anything not originating from the private subnet range.
+**VPC Flow Logs**
+I enabled [VPC Flow Logs](terraform/modules/security/flowlog.tf) writing to S3. Flow logs capture metadata about every network connection in the VPC. This provides evidence for when a breach or suspicious activity occurs including what communicated with what, when, and how much data moved. Also, compliance frameworks like PCI-DSS and ISO 27001 require demonstrable network monitoring and the ability to reconstruct network activity during an incident. I chose S3 over CloudWatch for cost management. 
+
+### 2C: EKS Cluster
+**Cluster Configuration**
+I provisioned the [EKS cluster](terraform/modules/eks/main.tf) with both public and private API endpoint access. I enabled public access to be able to manage the cluster from my VM. In a production environment, it should be Private-only access with a bastion or VPN to run kubectl.
+
+I enabled control plane logging for the api, audit, and authenticator log types. The api and audit logs capture who accessed the cluster and what they did, and the authenticator captures IAM-to-Kubernetes identity mapping. 
+
+**IMDSv2 Enforcement**
+I enforced IMDSv2 on both launch templates with a hop limit of 2. The Instance Metadata Service at 169.254.169.254 returns the node's live IAM role credentials to any caller. With IMDSv1, an attacker can exploit an SSRF vulnerability in DVWA which is intentionally vulnerable to make the server issue an HTTP GET to the metadata endpoint and steal the node's AWS credentials with no authentication. IMDSv2 will prevent this because it requires a PUT request to obtain a session token first.
+
+**etcd Encryption**
+I enabled envelope encryption for Kubernetes Secrets using a dedicated KMS customer managed key. etcd holds the complete cluster state including Secrets, ConfigMaps, pod specs, service account definitions, RBAC policies, network policies, and deployment configurations. An attacker who gains access to an unencrypted etcd snapshot has a complete blueprint of my infrastructure. By default EKS encrypts the underlying etcd EBS volume at the AWS level, but every object is stored in plaintext. With envelope encryption, every object will be additionally encrypted with my CMK before being written to disk. Hence, an attacker who gains access to an etcd snapshot or backup will not be able to read Secret values without also compromising the KMS key.
+
+**SSM Patch Management**
+I configured [SSM Patch Manager](terraform/modules/eks/ssm.tf) with a patch baseline for Amazon Linux 2023 nodes, a weekly maintenance window, and a Scan-only operation. I used Scan rather than Install for optimised EKS AMIs. This replaces the AMI as a whole rather than patching in place; installing packages live on a running node risks drifting away from the tested AMI configuration. The Scan operation will provide visibility on when a node's AMI is outdated, which will then be remediated by a node group rolling update to the new patched AMI. I configured the both launch templates to tag instances with the Patch Group tag so the maintenance window will correctly target the right instances.
+
+### 2D: IAM and IRSA
+**OIDC and IRSA**
+I configured an OIDC provider for the EKS cluster and created [IRSA roles](terraform/modules/eks/irsa.tf) for the EBS CSI driver and Vault. IRSA eliminates the need for any static AWS credentials inside pods. It also gives each workload its own distinct AWS identity so that compromising one pod does not grant the attacker the permissions of any other pod on the same node. I configured three conditions for each role trust policy: the OIDC sub claim to restrict which specific Kubernetes service account can assume the role, the aud claim to ensure the token is intended for AWS STS specifically, and an aws:SourceVpce condition to restrict role assumption to requests arriving through the cluster's own STS VPC endpoint.
+
+**SSM Session Manager**
+I configured [SSM Session Manager](terraform/modules/security/ssm_logging.tf) as the only administrative access path to nodes. I configured two IAM policy conditions to enforce this: sessions are restricted to instances tagged with the correct environment value, and only two approved SSM documents can be sent via SendCommand (AWS-RunPatchBaseline and AWS-RunShellScript). In production, I would also enforce a deny statement to block sessions where MFA is false.
+
+I configured the session activity to log to CloudWatch Logs for capturing an active session in real-time, and S3 for post-session transcripts. I used both because S3 only writes the complete transcript after a session ends, if an attacker starts a session and it is terminated abruptly, the in-progress output would be lost. CloudWatch streams continuously, so partial output will be captured before the session closes.
