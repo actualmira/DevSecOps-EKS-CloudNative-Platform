@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eso
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/actualmira/DevSecOps-EKS-CloudNative-Platform.git
+      targetRevision: main
+      path: k8s/eso
+      directory:
+        include: "eso.yaml"
+    - repoURL: https://charts.external-secrets.io
+      chart: external-secrets
+      targetRevision: "0.16.1"
+      helm:
+        valueFiles:
+          - $values/k8s/eso/eso-values.yaml
+    - repoURL: https://github.com/actualmira/DevSecOps-EKS-CloudNative-Platform.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: eso
+  syncPolicy:
+    automated: {}
+    syncOptions:
+      - ServerSideApply=true

@@ -1,7 +1,10 @@
-serviceAccount:
-  create: false
-  name: eso-sa
+global:
+  nodeSelector:
+    role: apps
 
+serviceAccount:
+  create: true
+  name: eso-sa
 
 resources:
   requests:

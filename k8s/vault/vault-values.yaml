@@ -12,17 +12,41 @@ ui:
 
 server:
   serviceAccount:
-    create: false
+    create: true
     name: vault
+
+  nodeSelector:
+    role: isolated
+
+  tolerations:
+    - key: "workload"
+      operator: "Equal"
+      value: "isolated"
+      effect: "NoSchedule"
 
   authDelegator:
     enabled: true
 
-  dev:
-    enabled: true
-    devRootToken: "root"
+  volumes:
+    - name: tmp
+      emptyDir: {}
+
+  volumeMounts:
+    - name: tmp
+      mountPath: /tmp
 
   dataStorage:
+    enabled: true
+    size: 10Gi
+    storageClass: ebs-sc
+
+  auditStorage:
+    enabled: true
+    size: 5Gi
+    storageClass: ebs-sc
+    mountPath: /vault/audit
+
+  ha:
     enabled: false
 
   resources:
@@ -32,14 +56,6 @@ server:
     limits:
       cpu: "500m"
       memory: "256Mi"
-
-  volumes:
-    - name: tmp
-      emptyDir: {}
-
-  volumeMounts:
-    - name: tmp
-      mountPath: /tmp
 
   statefulSet:
     securityContext:
@@ -71,3 +87,18 @@ server:
     periodSeconds: 10
     timeoutSeconds: 10
 
+  standalone:
+    enabled: true
+    config: |
+      ui = false
+      listener "tcp" {
+        address = "0.0.0.0:8200"
+        tls_disable = true
+      }
+      storage "file" {
+        path = "/vault/data"
+      }
+      seal "awskms" {
+        region     = "eu-west-1"
+        kms_key_id = "alias/devsecops-dev-vault-unseal"
+      }

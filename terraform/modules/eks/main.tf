@@ -351,7 +351,7 @@ resource "aws_eks_node_group" "isolated" {
   node_group_name = "${var.project}-${var.environment}-isolated"
   node_role_arn   = aws_iam_role.node_group.arn
   subnet_ids      = [var.isolated_subnet_ids[0]]
-  instance_types  = ["t3.micro"]
+  instance_types  = ["t3.medium"]
   ami_type        = "AL2023_x86_64_STANDARD"
   capacity_type   = "ON_DEMAND"
 

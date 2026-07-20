@@ -1,15 +1,20 @@
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
+apiVersion: v1
+kind: Namespace
 metadata:
-  name: mariadb-storage
-provisioner: k8s.io/minikube-hostpath
-volumeBindingMode: Immediate
+  name: database
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mariadb-sva
+  namespace: database
+automountServiceAccountToken: false
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: mariadb-init
-  namespace: production
+  namespace: database
 data:
   init.sh: |
     #!/bin/sh
@@ -26,7 +31,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: mariadb
-  namespace: production
+  namespace: database
 spec:
   serviceName: mariadb-svc
   replicas: 1
@@ -38,6 +43,13 @@ spec:
       labels:
         app: mariadb
     spec:
+      nodeSelector:
+        role: isolated
+      tolerations:
+        - key: "workload"
+          operator: "Equal"
+          value: "isolated"
+          effect: "NoSchedule"
       automountServiceAccountToken: false
       serviceAccountName: mariadb-sva
       securityContext:
@@ -80,24 +92,24 @@ spec:
             - name: MARIADB_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mariadb-secret-eso
+                  name: mariadb-secret
                   key: root-password
             - name: MARIADB_DATABASE
               value: "dvwa"
             - name: MARIADB_USER
               valueFrom:
                 secretKeyRef:
-                  name: mariadb-secret-eso
+                  name: mariadb-secret
                   key: db-user
             - name: MARIADB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mariadb-secret-eso
+                  name: mariadb-secret
                   key: db-password
             - name: HEALTHCHECK_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mariadb-secret-eso
+                  name: mariadb-secret
                   key: healthcheck-password
           ports:
             - containerPort: 3306
@@ -132,7 +144,7 @@ spec:
       spec:
         accessModes:
           - ReadWriteOnce
-        storageClassName: mariadb-storage
+        storageClassName: ebs-sc
         resources:
           requests:
             storage: 1Gi
@@ -141,7 +153,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: mariadb-svc
-  namespace: production
+  namespace: database
 spec:
   selector:
     app: mariadb
