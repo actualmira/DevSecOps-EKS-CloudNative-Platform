@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vault
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/actualmira/DevSecOps-EKS-CloudNative-Platform.git
+      targetRevision: main
+      path: k8s/vault
+      directory:
+        include: "vault.yaml"
+    - repoURL: https://helm.releases.hashicorp.com
+      chart: vault
+      targetRevision: "0.33.0"
+      helm:
+        valueFiles:
+          - $values/k8s/vault/vault-values.yaml
+        parameters:
+          - name: "server.serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
+            value: "arn:aws:iam::011555818509:role/devsecops-dev-vault-role"
+    - repoURL: https://github.com/actualmira/DevSecOps-EKS-CloudNative-Platform.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vault
+  syncPolicy:
+    automated: {}
