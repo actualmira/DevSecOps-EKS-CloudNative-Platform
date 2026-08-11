@@ -841,3 +841,72 @@ I configured an OIDC provider for the EKS cluster and created [IRSA roles](terra
 I configured [SSM Session Manager](terraform/modules/security/ssm_logging.tf) as the only administrative access path to nodes. I configured two IAM policy conditions to enforce this: sessions are restricted to instances tagged with the correct environment value, and only two approved SSM documents can be sent via SendCommand (AWS-RunPatchBaseline and AWS-RunShellScript). In production, I would also enforce a deny statement to block sessions where MFA is false.
 
 I configured the session activity to log to CloudWatch Logs for capturing an active session in real-time, and S3 for post-session transcripts. I used both because S3 only writes the complete transcript after a session ends, if an attacker starts a session and it is terminated abruptly, the in-progress output would be lost. CloudWatch streams continuously, so partial output will be captured before the session closes.
+
+
+## Phase 3: AWS Security Services
+
+### Phase 3A: Secrets Management on AWS
+This phase is an extension of vault's setup I started in minikube. I deployed Vault on EKS in the isolated node group. I configured it to use AWS KMS for auto-unseal on every pod restart using the IRSA to call KMS to decrypt its own root encryption key and unseal itself automatically without any human intervention.
+
+I attached the KMS unseal key permission on Vault's dedicated IRSA role and not the node's IAM role. This eliminates the risk of a compromised MariaDB pod which runs in the same node inheriting the permission to call KMS and potentially unseal Vault from the outside. 
+
+I also configured two Vault audit backends: a file backend writing to the Vault pod's local filesystem, and a syslog backend. The two backends will prevent an attacker from exploiting the default fail-closed nature of Vault's audit system which blocks the request entirely if the audit backend is unreachable thereby causing a DoS.
+
+I enabled ESO to Vault traffic to run over TLS. This follows Zero Trust principle because if the traffic is unencrypted, an attacker with network access inside the cluster can intercept credentials in transit without needing to compromise either service.
+
+I initially used kubernetes reflector to reflect the cert-manager certificate to ESO namespace. I moved away from it because it mirrors the entire Kubernetes Secret, which for a TLS certificate includes the private key alongside the public certificate which ESO needs. Distributing the private key to the ESO namespace unnecessarily is a real exposure where if the ESO namespace is compromised, the attacker gets the private key and can impersonate Vault.
+
+I resolved to using trust manager which distributes only the public certificate into a ConfigMap in the ESO namespace.  I also scoped the trust bundle distribution to only the ESO namespace following the principle of least privilege.
+
+### Phase 3B: ALB and WAF
+
+In this phase, I set up and configured the Application Load Balancer and Web Application Firewall.
+
+I placed the ALB Controller in the private subnet because it's a Kubernetes controller that watches for Ingress resources, makes AWS API calls to provision and configure ALBs on my behalf, and requires a privileged IRSA. Putting it in the public subnet where it is directly reached from the internet would expose the pod with its extensive privileges closer to the public network. If the pod is compromised, the attacker has an IRSA that can manipulate load balancers. Also, by keeping it in the private subnet, it reaches the AWS APIs through secure, internal VPC endpoints.
+
+DVWA is a deliberately vulnerable application with known vulnerabilities like SQL Injection and XSS. I implemented managed rule groups to mitigate these vulnerabilities.
+The SQL Database managed rule group blocks known SQL injection patterns at the ALB edge before the request reaches the application. Also, the Common Threats managed rule group catches known XSS patterns in request parameters, headers, and body. Both rule groups are maintained by AWS and updated automatically as new attack patterns are published. 
+Inasmuch as AWS Shield is automatically enabled, I also implemented WAF rate limiting at 100 requests per minute per IP to throttle HTTP flood attacks and automated brute force tools like credential stuffing. Shield Standard operates at the network layer and absorbs volumetric attacks at the AWS edge like SYN floods and UDP amplification. It does not have visibility into HTTP request content. A flood of HTTP GET requests can pass through Shield because each individual TCP connection is valid.
+
+With CloudWatch metrics and sampled requests enabled, WAF will store a sample of the requests that matched each rule in the WAF console, and will provide visibility into the actual request content for investigation. In a production environment, I can combine this with full WAF logging to Kinesis Firehose to capture all requests.
+
+I configured the ALB to terminate TLS using a certificate I generated with cert-manager and imported into ACM with ALB security policy enforcing TLS 1.3 only at the connection level. This eliminates known weaknesses like CBC mode ciphers vulnerabilities that can be seen with TLS 1.2 or lower versions. TLS 1.3 eliminates all of them, has a faster handshake, and provides forward secrecy by default on every connection.
+
+I also configured at the ALB listener level, HTTP redirect to HTTPS before any content is served. I combined it with HSTS to instruct browsers to never attempt an HTTP connection to my domain.
+
+I stripped the ALB response header to enforce the security principle of Reconnaissance defense through Information Obscurity. DVWA is a pre-built image that I do not control, I would need to either configure the server inside the DVWA image to suppress the header, which requires rebuilding the image, or configure a response transformation at the third-party ingress controller level like envoy or NGINX.
+
+### Phase 3C: GuardDuty, AWS Config and Security Hub
+
+- **GuardDuty**
+I configured guardduty for account wide threat detection. It monitors CloudTrail API call logs, VPC Flow Logs, and DNS query logs. I enabled runtime monitoring with eks addon management and ec2 agent management, audit logs to provide visibility into events at the Kubernetes control plane like privilege escalations, suspicious exec commands, or abnormal API call patterns from service accounts, s3 data events, ebs malware protection, and lambda network logs monitoring.
+
+- **AWS Config**
+
+I also enabled AWS config to detect misconfigurations for autoremediation and maintaning the required security posture. I created a dedicated KMS customer-managed key for the Config S3 bucket rather than reusing the CloudTrail key or any other existing key. The is to contain blast radius in a case of compromise.
+
+- **Security Hub**
+I linked Config and Guardduty to Security Hub to have a centralized dashboard for the security findings for easy monitoring. I configured the Security Control mode which consolidates controls so that the same underlying check only produces one finding regardless of how many standards reference it which reduces noise.
+
+### Phase 3D: EventBridge and Lambda Automated Remediation
+
+I configured lambda functions for auto-remediation of critical threats or misconfigurations when triggered through eventbridge by Guardduty findings or Config.
+I configured each Lambda function with its own IAM role with only the permissions it needs. This follows the principle of least privilege and prevents an attacker who exploits a vulnerability in one function from exploiting others.
+
+I inline zip files for the lambda codes which are deployed through terraform on the fly because they are small single-file Python scripts. It also makes version control easier. I could use an S3 deployment in a production environment with large deployment packages that need to be shared across multiple functions or accounts, or when there is a need for separate lifecycle management for the code.
+
+For the S3 account-level Block Public Access remediation, I used an SSM Automation document (AWSConfigRemediation-ConfigureS3PublicAccessBlock) rather than a Lambda function. The removes the maintenance burden because AWS owns and maintains that SSM document. 
+
+The CloudTrail Config rule evaluates and fires when any trail is NON COMPLIANT but I configured the remediation handler to only auto-remediate the main trail. This is because there are justifications why a trail may need to be discontinued and enforcing autoremediation on all trails is not the right call. I enforced it on the main trail because it captures core security information and should never be disabled.
+
+I configured the instance credential exfiltration remediation to send sns alert instead of revoking the node role. This is because this is a dev environment and there’s no multi availability. Revoking the node role will cause every pod on that node to loose access to AWS causing denial of service. In a production environment with multi availability, I should configure it to revoke the node role.
+
+Similarly, I moved the threats that requires automated eks node isolation to send sns alert instead because there’s no multi availability. In a production environment, these alerts would require isolating the node automatically.
+
+I configured the compromised credential finding (UnauthorizedAccess:IAMUser/*) to be auto-remediated by applying a deny policy to the IAM role or deactivating the access key. This is because for that threat to be flagged, AWS's threat intelligence has already made the determination with high confidence. A human reviewing the finding before remediating widens the window between detection and containment, and this leaves the credentials active giving the attacker time to create new credentials, escalate privileges, or exfiltrate data. it denies the specific session or deactivates the specific key, so the blast radius is contained.
+
+### Phase 4E: ECR Hardening
+
+I used private repository for dvwa because it serves as my custom application which should never be in a public repository 
+
+I configured Pull-Through cache for other upstream images because they’re from trusted open source and I do not need to modify anyone. Also, none of the images has internet dependency at runtime. Creating a private repository for them will add a maintenance burden where I would need to manually update them as new versions are released
