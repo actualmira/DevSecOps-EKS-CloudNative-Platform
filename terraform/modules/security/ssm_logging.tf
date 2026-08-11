@@ -65,7 +65,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "ssm_session_logs" {
 
 resource "aws_cloudwatch_log_group" "ssm_session_logs" {
   name              = "/${var.project}/${var.environment}/ssm-session-logs"
-  retention_in_days = 90
+  retention_in_days = 30
   kms_key_id        = aws_kms_key.ssm_session_logs.arn
 
   tags = {

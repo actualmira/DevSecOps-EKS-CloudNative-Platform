@@ -36,7 +36,7 @@ resource "aws_security_group" "isolated" {
 
 resource "aws_security_group" "vpc_endpoints" {
   name        = "${var.project}-${var.environment}-vpc-endpoints-sg"
-  description = "Security group for VPC interface endpoints (ECR, STS)"
+  description = "Security group for VPC interface endpoints (ECR, STS, EKS, Logs)"
   vpc_id      = aws_vpc.devsecops.id
 
   tags = {
@@ -71,7 +71,31 @@ resource "aws_vpc_security_group_ingress_rule" "alb_https" {
   }
 }
 
+resource "aws_vpc_security_group_ingress_rule" "alb_http" {
+  security_group_id = aws_security_group.alb.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 80
+  to_port           = 80
+  ip_protocol       = "tcp"
+
+  tags = {
+    Name = "${var.project}-${var.environment}-alb-http"
+  }
+}
+
 # Application node rules
+resource "aws_vpc_security_group_ingress_rule" "apps_from_alb" {
+  security_group_id            = aws_security_group.apps.id
+  referenced_security_group_id = aws_security_group.alb.id
+  from_port                    = 80
+  to_port                      = 80
+  ip_protocol                  = "tcp"
+
+  tags = {
+    Name = "${var.project}-${var.environment}-apps-from-alb"
+  }
+}
+
 resource "aws_vpc_security_group_egress_rule" "apps_to_mariadb" {
   security_group_id            = aws_security_group.apps.id
   referenced_security_group_id = aws_security_group.isolated.id

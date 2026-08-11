@@ -108,3 +108,65 @@ resource "aws_iam_role_policy_attachment" "vault_kms_unseal" {
   role       = aws_iam_role.vault.name
   policy_arn = aws_iam_policy.vault_kms_unseal.arn
 }
+
+# Load Balancer Controller IRSA
+data "aws_iam_policy_document" "aws_lbc_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.eks.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub"
+      values   = ["system:serviceaccount:kube-system:aws-load-balancer-controller"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceVpce"
+      values   = [var.sts_vpc_endpoint_id]
+    }
+  }
+}
+
+resource "aws_iam_role" "aws_lbc" {
+  name               = "${var.project}-${var.environment}-aws-lbc-role"
+  assume_role_policy = data.aws_iam_policy_document.aws_lbc_assume_role.json
+
+  tags = {
+    Name        = "${var.project}-${var.environment}-aws-lbc-role"
+    Environment = var.environment
+    Project     = var.project
+  }
+}
+
+data "http" "aws_lbc_policy" {
+  url = "https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.11.0/docs/install/iam_policy.json"
+}
+
+resource "aws_iam_policy" "aws_lbc" {
+  name   = "${var.project}-${var.environment}-aws-lbc-policy"
+  policy = data.http.aws_lbc_policy.response_body
+
+  tags = {
+    Name        = "${var.project}-${var.environment}-aws-lbc-policy"
+    Environment = var.environment
+    Project     = var.project
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "aws_lbc" {
+  role       = aws_iam_role.aws_lbc.name
+  policy_arn = aws_iam_policy.aws_lbc.arn
+}
