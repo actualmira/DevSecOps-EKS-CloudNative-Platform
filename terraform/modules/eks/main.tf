@@ -195,53 +195,97 @@ resource "aws_vpc_security_group_egress_rule" "nodes_to_nodes" {
   }
 }
 
-resource "aws_iam_role" "node_group" {
-  name = "${var.project}-${var.environment}-node-group-role"
+resource "aws_iam_role" "apps_node" {
+  name = "${var.project}-${var.environment}-apps-node-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "ec2.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
       }
-    ]
+      Action = "sts:AssumeRole"
+    }]
   })
 
   tags = {
-    Name        = "${var.project}-${var.environment}-node-group-role"
+    Name        = "${var.project}-${var.environment}-apps-node-role"
     Environment = var.environment
     Project     = var.project
   }
 }
 
-resource "aws_iam_role_policy_attachment" "node_group_eks_worker" {
-  role       = aws_iam_role.node_group.name
+resource "aws_iam_role_policy_attachment" "apps_node_eks_worker" {
+  role       = aws_iam_role.apps_node.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
 }
 
-resource "aws_iam_role_policy_attachment" "node_group_ecr" {
-  role       = aws_iam_role.node_group.name
+resource "aws_iam_role_policy_attachment" "apps_node_ecr" {
+  role       = aws_iam_role.apps_node.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }
 
-resource "aws_iam_role_policy_attachment" "node_group_cni" {
-  role       = aws_iam_role.node_group.name
+resource "aws_iam_role_policy_attachment" "apps_node_cni" {
+  role       = aws_iam_role.apps_node.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
 }
 
-resource "aws_iam_role_policy_attachment" "node_group_ssm" {
-  role       = aws_iam_role.node_group.name
+resource "aws_iam_role_policy_attachment" "apps_node_ssm" {
+  role       = aws_iam_role.apps_node.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-resource "aws_iam_role_policy_attachment" "node_group_ssm_session_logging" {
-  role       = aws_iam_role.node_group.name
+resource "aws_iam_role_policy_attachment" "apps_node_ssm_session_logging" {
+  role       = aws_iam_role.apps_node.name
   policy_arn = var.ssm_session_logging_policy_arn
 }
+
+resource "aws_iam_role" "isolated_node" {
+  name = "${var.project}-${var.environment}-isolated-node-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+
+  tags = {
+    Name        = "${var.project}-${var.environment}-isolated-node-role"
+    Environment = var.environment
+    Project     = var.project
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "isolated_node_eks_worker" {
+  role       = aws_iam_role.isolated_node.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "isolated_node_ecr" {
+  role       = aws_iam_role.isolated_node.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_iam_role_policy_attachment" "isolated_node_cni" {
+  role       = aws_iam_role.isolated_node.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+}
+
+resource "aws_iam_role_policy_attachment" "isolated_node_ssm" {
+  role       = aws_iam_role.isolated_node.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_role_policy_attachment" "isolated_node_ssm_session_logging" {
+  role       = aws_iam_role.isolated_node.name
+  policy_arn = var.ssm_session_logging_policy_arn
+} 
 
 resource "aws_launch_template" "apps" {
   name = "${var.project}-${var.environment}-apps-lt"
@@ -310,7 +354,7 @@ resource "aws_launch_template" "isolated" {
 resource "aws_eks_node_group" "apps" {
   cluster_name    = aws_eks_cluster.devsecops.name
   node_group_name = "${var.project}-${var.environment}-apps"
-  node_role_arn   = aws_iam_role.node_group.arn
+  node_role_arn   = aws_iam_role.apps_node.arn
   subnet_ids      = [var.private_subnet_ids[0]]
   instance_types  = ["t3.large"]
   ami_type        = "AL2023_x86_64_STANDARD"
@@ -318,7 +362,7 @@ resource "aws_eks_node_group" "apps" {
 
   launch_template {
     id      = aws_launch_template.apps.id
-    version = "$Latest"
+    version = aws_launch_template.apps.latest_version
   }
 
   scaling_config {
@@ -333,10 +377,10 @@ resource "aws_eks_node_group" "apps" {
   }
 
   depends_on = [
-    aws_iam_role_policy_attachment.node_group_eks_worker,
-    aws_iam_role_policy_attachment.node_group_ecr,
-    aws_iam_role_policy_attachment.node_group_cni,
-    aws_iam_role_policy_attachment.node_group_ssm
+    aws_iam_role_policy_attachment.apps_node_eks_worker,
+    aws_iam_role_policy_attachment.apps_node_ecr,
+    aws_iam_role_policy_attachment.apps_node_cni,
+    aws_iam_role_policy_attachment.apps_node_ssm
   ]
 
   tags = {
@@ -349,7 +393,7 @@ resource "aws_eks_node_group" "apps" {
 resource "aws_eks_node_group" "isolated" {
   cluster_name    = aws_eks_cluster.devsecops.name
   node_group_name = "${var.project}-${var.environment}-isolated"
-  node_role_arn   = aws_iam_role.node_group.arn
+  node_role_arn   = aws_iam_role.isolated_node.arn
   subnet_ids      = [var.isolated_subnet_ids[0]]
   instance_types  = ["t3.medium"]
   ami_type        = "AL2023_x86_64_STANDARD"
@@ -357,7 +401,7 @@ resource "aws_eks_node_group" "isolated" {
 
   launch_template {
     id      = aws_launch_template.isolated.id
-    version = "$Latest"
+    version = aws_launch_template.isolated.latest_version
   }
 
   scaling_config {
@@ -378,10 +422,10 @@ resource "aws_eks_node_group" "isolated" {
   }
 
   depends_on = [
-    aws_iam_role_policy_attachment.node_group_eks_worker,
-    aws_iam_role_policy_attachment.node_group_ecr,
-    aws_iam_role_policy_attachment.node_group_cni,
-    aws_iam_role_policy_attachment.node_group_ssm
+    aws_iam_role_policy_attachment.isolated_node_eks_worker,
+    aws_iam_role_policy_attachment.isolated_node_ecr,
+    aws_iam_role_policy_attachment.isolated_node_cni,
+    aws_iam_role_policy_attachment.isolated_node_ssm
   ]
 
   tags = {
