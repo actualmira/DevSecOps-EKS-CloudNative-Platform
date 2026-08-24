@@ -163,20 +163,20 @@ resource "aws_iam_role_policy" "remediate_security_group" {
 # LAMBDA FUNCTIONS
 data "archive_file" "revoke_iam_session" {
   type        = "zip"
-  source_dir = "${path.module}/../../../lambda/revoke_iam_session"
-  output_path = "${path.module}/../../../lambda/revoke_iam_session/handler.zip"
+  source_dir = "${var.lambda_source_path}/revoke_iam_session"
+  output_path = "${var.lambda_source_path}/zips/revoke_iam_session.zip"
 }
 
 data "archive_file" "remediate_cloudtrail" {
   type        = "zip"
-  source_dir  = "${path.module}/../../../lambda/remediate_cloudtrail"
-  output_path = "${path.module}/../../../lambda/remediate_cloudtrail/handler.zip"
+  source_dir  = "${var.lambda_source_path}/remediate_cloudtrail"
+  output_path = "${var.lambda_source_path}/zips/remediate_cloudtrail.zip"
 }
 
 data "archive_file" "remediate_security_group" {
   type        = "zip"
-  source_dir  = "${path.module}/../../../lambda/remediate_security_group"
-  output_path = "${path.module}/../../../lambda/remediate_security_group/handler.zip"
+  source_dir  = "${var.lambda_source_path}/remediate_security_group"
+  output_path = "${var.lambda_source_path}/zips/remediate_security_group.zip"
 }
 
 resource "aws_lambda_function" "revoke_iam_session" {

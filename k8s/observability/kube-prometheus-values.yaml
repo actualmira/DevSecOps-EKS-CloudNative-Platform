@@ -1,0 +1,115 @@
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    nodeSelector:
+      role: observability
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: ebs-sc
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+
+alertmanager:
+  alertmanagerSpec:
+    nodeSelector:
+      role: observability
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: ebs-sc
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+  serviceAccount:
+    create: true
+    name: kube-prometheus-stack-alertmanager
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::011555818509:role/devsecops-dev-alertmanager-role
+  config:
+    receivers:
+      - name: "null"
+      - name: alertmanager-sns
+        sns_configs:
+          - topic_arn: "arn:aws:sns:eu-west-1:011555818509:devsecops-dev-alertmanager-alerts"
+            subject: "Alert: {{ .CommonLabels.alertname }}"
+            message: |
+              Alert: {{ .CommonLabels.alertname }}
+              Severity: {{ .CommonLabels.severity }}
+              Namespace: {{ .CommonLabels.namespace }}
+              Description: {{ .CommonAnnotations.description }}
+              Summary: {{ .CommonAnnotations.summary }}
+    route:
+      receiver: "null"
+      routes:
+        - matchers:
+            - severity = critical
+          receiver: alertmanager-sns
+          group_wait: 30s
+          group_interval: 5m
+          repeat_interval: 1h
+
+grafana:
+  enabled: true
+  nodeSelector:
+    role: observability
+  admin:
+    existingSecret: grafana-admin-credentials
+    userKey: admin-user
+    passwordKey: admin-password
+  persistence:
+    enabled: true
+    storageClassName: ebs-sc
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  defaultDashboardsEnabled: true
+  service:
+    type: ClusterIP
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki-gateway.observability.svc.cluster.local
+      isDefault: false
+
+prometheusOperator:
+  nodeSelector:
+    role: observability
+
+kube-state-metrics:
+  nodeSelector:
+    role: observability
+
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true
+
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false

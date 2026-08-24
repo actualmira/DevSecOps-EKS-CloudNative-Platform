@@ -1,0 +1,121 @@
+deploymentMode: SimpleScalable
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: s3
+    bucketNames:
+      chunks: devsecops-dev-loki-logs
+      ruler: devsecops-dev-loki-logs
+      admin: devsecops-dev-loki-logs
+    s3:
+      region: eu-west-1
+      s3ForcePathStyle: false
+      insecure: false
+      sse:
+        type: SSE-KMS
+        kms_key_id: "alias/devsecops-dev-loki-key"
+
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: s3
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+
+  limits_config:
+    retention_period: 672h
+    reject_old_samples: true
+    reject_old_samples_max_age: 168h
+
+  compactor:
+    retention_enabled: true
+    delete_request_store: s3
+
+memberlist:
+  service:
+    publishNotReadyAddresses: true
+
+serviceAccount:
+  create: true
+  name: loki
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::011555818509:role/devsecops-dev-loki-role
+
+write:
+  replicas: 1
+  nodeSelector:
+    role: observability
+  persistence:
+    storageClass: ebs-sc
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+read:
+  replicas: 1
+  nodeSelector:
+    role: observability
+  persistence:
+    storageClass: ebs-sc
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+backend:
+  replicas: 1
+  nodeSelector:
+    role: observability
+  persistence:
+    storageClass: ebs-sc
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+gateway:
+  enabled: true
+  replicas: 1
+  nodeSelector:
+    role: observability
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+chunksCache:
+  enabled: true
+  allocatedMemory: 512
+  allocatedCPU: 200m
+  nodeSelector:
+    role: observability
+
+resultsCache:
+  enabled: true
+  allocatedMemory: 256
+  allocatedCPU: 100m
+  nodeSelector:
+    role: observability
+
+lokiCanary:
+  enabled: false
+test:
+  enabled: false

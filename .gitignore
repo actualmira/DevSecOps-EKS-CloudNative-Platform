@@ -38,3 +38,7 @@ terraform.rc
 cosign.key
 *.key
 .terraform/
+**/.terragrunt-cache/
+.terragrunt-cache/
+lambda/zips/
+**/*.zip

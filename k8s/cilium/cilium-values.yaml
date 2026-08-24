@@ -1,0 +1,15 @@
+cni:
+  chainingMode: aws-cni
+  exclusive: false
+
+enableIPv4Masquerade: false
+
+routingMode: native
+
+endpointRoutes:
+  enabled: true
+
+kubeProxyReplacement: false
+
+operator:
+  replicas: 1

@@ -1,0 +1,45 @@
+global:
+  leaderElection:
+    namespace: cert-manager
+
+crds:
+  enabled: true
+
+nodeSelector:
+  role: observability
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
+containerSecurityContext:
+  readOnlyRootFilesystem: true
+
+webhook:
+  nodeSelector:
+    role: observability
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+
+cainjector:
+  nodeSelector:
+    role: observability
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+  containerSecurityContext:
+    readOnlyRootFilesystem: true

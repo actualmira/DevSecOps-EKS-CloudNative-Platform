@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: falco-default-deny
+  name: default-deny-all
   namespace: falco
 spec:
   podSelector: {}
@@ -9,62 +9,120 @@ spec:
     - Ingress
     - Egress
 ---
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
-  name: falco-network-policy
+  name: falco-dns-egress
   namespace: falco
 spec:
-  podSelector:
+  endpointSelector: {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s-app: kube-dns
+            k8s:io.kubernetes.pod.namespace: kube-system
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: falco-egress-policy
+  namespace: falco
+spec:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/name: falco
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress: []
   egress:
-    - ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
-    - ports:
-        - port: 443
-          protocol: TCP
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: falcosidekick
-      ports:
-        - port: 2801
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: falcosidekick
+            k8s:io.kubernetes.pod.namespace: falco
+      toPorts:
+        - ports:
+            - port: "2801"
+              protocol: TCP
+    - toFQDNs:
+        - matchPattern: "falcosecurity.github.io"
+        - matchPattern: "*.ghcr.io"
+        - matchPattern: "ghcr.io"
+        - matchPattern: "*.githubusercontent.com"
+        - matchPattern: "*.sigstore.dev"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
 ---
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
-  name: falco-sidekick-network-policy
+  name: falcosidekick-policy
   namespace: falco
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/name: falcosidekick
-  policyTypes:
-    - Ingress
-    - Egress
   ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: falco
-      ports:
-        - port: 2801
-          protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: falco
+            k8s:io.kubernetes.pod.namespace: falco
+      toPorts:
+        - ports:
+            - port: "2801"
+              protocol: TCP
   egress:
-    - ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
-    - ports:
-        - port: 443
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: loki
+            app.kubernetes.io/component: gateway
+            k8s:io.kubernetes.pod.namespace: observability
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: falco-prometheus-ingress
+  namespace: falco
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: falco
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: prometheus
+            k8s:io.kubernetes.pod.namespace: observability
+      toPorts:
+        - ports:
+            - port: "8765"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: falcosidekick-prometheus-ingress
+  namespace: falco
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: falcosidekick
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: prometheus
+            k8s:io.kubernetes.pod.namespace: observability
+      toPorts:
+        - ports:
+            - port: "2801"
+              protocol: TCP

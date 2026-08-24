@@ -1,3 +1,4 @@
+# alb security group
 resource "aws_security_group" "alb" {
   name        = "${var.project}-${var.environment}-alb-sg"
   description = "Security group for Application Load Balancer"
@@ -10,6 +11,7 @@ resource "aws_security_group" "alb" {
   }
 }
 
+# app node security group
 resource "aws_security_group" "apps" {
   name        = "${var.project}-${var.environment}-apps-sg"
   description = "Security group for application nodes running DVWA, ESO, Observability, Falco"
@@ -22,6 +24,7 @@ resource "aws_security_group" "apps" {
   }
 }
 
+# isolated node security group
 resource "aws_security_group" "isolated" {
   name        = "${var.project}-${var.environment}-isolated-sg"
   description = "Security group for isolated nodes running MariaDB and Vault"
@@ -34,6 +37,20 @@ resource "aws_security_group" "isolated" {
   }
 }
 
+# observability node security group
+resource "aws_security_group" "observability_node" {
+  name        = "${var.project}-${var.environment}-observability-node-sg"
+  description = "Security group for observability node"
+  vpc_id      = aws_vpc.devsecops.id
+
+  tags = {
+    Name        = "${var.project}-${var.environment}-observability-node-sg"
+    Environment = var.environment
+    Project     = var.project
+  }
+}
+
+# vpc endpoint security group
 resource "aws_security_group" "vpc_endpoints" {
   name        = "${var.project}-${var.environment}-vpc-endpoints-sg"
   description = "Security group for VPC interface endpoints (ECR, STS, EKS, Logs)"
@@ -46,6 +63,7 @@ resource "aws_security_group" "vpc_endpoints" {
   }
 }
 
+# kms endpoint security group
 resource "aws_security_group" "vpc_endpoints_kms" {
   name        = "${var.project}-${var.environment}-vpc-endpoints-kms-sg"
   description = "Security group for the KMS VPC endpoint for isolated tier only"
@@ -193,6 +211,20 @@ resource "aws_vpc_security_group_egress_rule" "isolated_to_internet" {
   }
 }
 
+# observability node sg rules
+resource "aws_vpc_security_group_egress_rule" "observability_node_egress" {
+  security_group_id = aws_security_group.observability_node.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+
+  tags = {
+    Name = "${var.project}-${var.environment}-observability-node-egress"
+  }
+}
+
+
 # VPC Endpoints SG rules
 resource "aws_vpc_security_group_ingress_rule" "endpoints_from_apps" {
   security_group_id            = aws_security_group.vpc_endpoints.id
@@ -215,6 +247,18 @@ resource "aws_vpc_security_group_ingress_rule" "endpoints_from_isolated" {
 
   tags = {
     Name = "${var.project}-${var.environment}-endpoints-from-isolated"
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "endpoints_from_observabiity" {
+  security_group_id            = aws_security_group.vpc_endpoints.id
+  referenced_security_group_id = aws_security_group.observability_node.id
+  from_port                    = 443
+  to_port                      = 443
+  ip_protocol                  = "tcp"
+
+  tags = {
+    Name = "${var.project}-${var.environment}-endpoints-from-observability"
   }
 }
 

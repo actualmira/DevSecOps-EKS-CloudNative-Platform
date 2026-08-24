@@ -1,0 +1,107 @@
+driver:
+  enabled: true
+  kind: modern_ebpf
+  modernEbpf:
+    leastPrivileged: true
+
+metrics:
+  enabled: true
+
+logLevel: warning
+
+falco:
+  stdout_output:
+    enabled: false
+  json_output: true
+  priority: notice
+  rules_files:
+    - /etc/falco/falco_rules.yaml
+    - /etc/falco/rules.d
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+tolerations:
+  - key: "workload"
+    operator: "Equal"
+    value: "isolated"
+    effect: "NoSchedule"
+
+
+customRules:
+  custom_rules.yaml: |-
+
+    - rule: Shell Spawned in Container
+      desc: A shell process spawned inside a running container.
+      condition: >
+        spawned_process and
+        container and
+        shell_procs and
+        not proc.pname in (shell_procs) and
+        not user.name = healthcheck and
+        not (container.image.repository contains "mariadb" and proc.cmdline contains "mysqladmin") and
+        not (container.image.repository contains "hashicorp/vault" and proc.cmdline contains "vault status")
+      output: "Shell spawned in container (user=%user.name container=%container.name image=%container.image.repository shell=%proc.name parent=%proc.pname cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)"
+      priority: WARNING
+      tags: [container, shell]
+
+    - rule: Privilege Escalation Syscall in Container
+      desc: A process executed a setuid or setgid syscall inside a container.
+      condition: >
+        container and
+        evt.type in (setuid, setgid) and
+        not user.uid = 0 and
+        not (proc.name startswith runc and proc.cmdline contains init) and
+        not (container.image.repository contains "hashicorp/vault" and proc.cmdline contains "vault status")
+      output: "Privilege escalation syscall in container (user=%user.name uid=%user.uid container=%container.name image=%container.image.repository syscall=%evt.type cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)"
+      priority: CRITICAL
+      tags: [syscall, privilege_escalation]
+
+    - rule: Security Agent Termination Attempt
+      desc: An attempt was made to terminate the Falco security monitoring process.
+      condition: >
+        spawned_process and
+        proc.name in (kill, pkill, killall) and
+        proc.cmdline contains falco
+      output: "Falco agent termination attempt detected (user=%user.name process=%proc.name cmdline=%proc.cmdline container=%container.name namespace=%k8s.ns.name pod=%k8s.pod.name)"
+      priority: CRITICAL
+      tags: [falco, tamper]
+
+
+falcoctl:
+  artifact:
+    follow:
+      resources:
+        requests:
+          cpu: "10m"
+          memory: "64Mi"
+        limits:
+          cpu: "100m"
+          memory: "128Mi"
+
+falcosidekick:
+  enabled: true
+  replicaCount: 1
+  nodeSelector:
+    role: observability
+  resources:
+    requests:
+      cpu: "10m"
+      memory: "64Mi"
+    limits:
+      cpu: "100m"
+      memory: "128Mi"
+  config:
+    loki:
+      hostport: "http://loki-gateway.observability.svc.cluster.local"
+      minimumpriority: "warning"
+    stdout:
+      enabled: false
+
+
+
+
