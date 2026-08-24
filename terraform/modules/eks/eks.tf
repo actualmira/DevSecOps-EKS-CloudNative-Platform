@@ -1,5 +1,6 @@
 data "aws_caller_identity" "current" {}
 
+# eks cluster
 resource "aws_cloudwatch_log_group" "eks_cluster" {
   name              = "/aws/eks/${var.project}-${var.environment}-cluster/cluster"
   retention_in_days = 30
@@ -48,7 +49,7 @@ data "aws_iam_policy_document" "eks_secrets_kms" {
       "kms:DescribeKey",
       "kms:CreateGrant"
     ]
-    resources = [var.eks_secrets_key_arn]
+    resources = [aws_kms_key.eks_secrets.arn]
   }
 }
 
@@ -81,7 +82,7 @@ resource "aws_eks_cluster" "devsecops" {
 
   encryption_config {
     provider {
-      key_arn = var.eks_secrets_key_arn
+      key_arn = aws_kms_key.eks_secrets.arn
     }
     resources = ["secrets"]
   }
@@ -99,6 +100,7 @@ resource "aws_eks_cluster" "devsecops" {
   }
 }
 
+# oidc provider
 data "tls_certificate" "eks" {
   url = aws_eks_cluster.devsecops.identity[0].oidc[0].issuer
 }
@@ -115,6 +117,7 @@ resource "aws_iam_openid_connect_provider" "eks" {
   }
 }
 
+# vpc cni
 resource "aws_eks_addon" "vpc_cni" {
   cluster_name = aws_eks_cluster.devsecops.name
   addon_name   = "vpc-cni"
@@ -129,6 +132,7 @@ resource "aws_eks_addon" "vpc_cni" {
   }
 }
 
+# kube proxy
 resource "aws_eks_addon" "kube_proxy" {
   cluster_name = aws_eks_cluster.devsecops.name
   addon_name   = "kube-proxy"
@@ -143,6 +147,7 @@ resource "aws_eks_addon" "kube_proxy" {
   }
 }
 
+# coredns
 resource "aws_eks_addon" "coredns" {
   cluster_name = aws_eks_cluster.devsecops.name
   addon_name   = "coredns"
@@ -152,7 +157,8 @@ resource "aws_eks_addon" "coredns" {
 
   depends_on = [
     aws_eks_node_group.apps,
-    aws_eks_node_group.isolated
+    aws_eks_node_group.isolated,
+    aws_eks_node_group.observability
   ]
 
   tags = {
@@ -162,6 +168,7 @@ resource "aws_eks_addon" "coredns" {
   }
 }
 
+# shared security group
 resource "aws_security_group" "node_shared" {
   name        = "${var.project}-${var.environment}-node-shared-sg"
   description = "Shared security group for all EKS worker nodes"
@@ -195,6 +202,7 @@ resource "aws_vpc_security_group_egress_rule" "nodes_to_nodes" {
   }
 }
 
+# app node
 resource "aws_iam_role" "apps_node" {
   name = "${var.project}-${var.environment}-apps-node-role"
 
@@ -241,6 +249,7 @@ resource "aws_iam_role_policy_attachment" "apps_node_ssm_session_logging" {
   policy_arn = var.ssm_session_logging_policy_arn
 }
 
+# isolated node
 resource "aws_iam_role" "isolated_node" {
   name = "${var.project}-${var.environment}-isolated-node-role"
 
@@ -287,6 +296,54 @@ resource "aws_iam_role_policy_attachment" "isolated_node_ssm_session_logging" {
   policy_arn = var.ssm_session_logging_policy_arn
 } 
 
+# observability node
+resource "aws_iam_role" "observability_node" {
+  name = "${var.project}-${var.environment}-observability-node-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+
+  tags = {
+    Name        = "${var.project}-${var.environment}-observability-node-role"
+    Environment = var.environment
+    Project     = var.project
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "observability_node_eks_worker" {
+  role       = aws_iam_role.observability_node.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "observability_node_ecr" {
+  role       = aws_iam_role.observability_node.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_iam_role_policy_attachment" "observability_node_cni" {
+  role       = aws_iam_role.observability_node.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+}
+
+resource "aws_iam_role_policy_attachment" "observability_node_ssm" {
+  role       = aws_iam_role.observability_node.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_role_policy_attachment" "observability_node_ssm_session_logging" {
+  role       = aws_iam_role.observability_node.name
+  policy_arn = var.ssm_session_logging_policy_arn
+}
+
+# app node launch template
 resource "aws_launch_template" "apps" {
   name = "${var.project}-${var.environment}-apps-lt"
 
@@ -297,7 +354,7 @@ resource "aws_launch_template" "apps" {
 
   metadata_options {
     http_tokens                = "required"
-    http_put_response_hop_limit = 2
+    http_put_response_hop_limit = 1
     http_endpoint               = "enabled"
   }
 
@@ -319,6 +376,7 @@ resource "aws_launch_template" "apps" {
   }
 }
 
+# isolated node launch template
 resource "aws_launch_template" "isolated" {
   name = "${var.project}-${var.environment}-isolated-lt"
 
@@ -329,7 +387,7 @@ resource "aws_launch_template" "isolated" {
 
   metadata_options {
     http_tokens                = "required"
-    http_put_response_hop_limit = 2
+    http_put_response_hop_limit = 1
     http_endpoint               = "enabled"
   }
 
@@ -351,6 +409,39 @@ resource "aws_launch_template" "isolated" {
   }
 }
 
+# observability node launch template
+resource "aws_launch_template" "observability" {
+  name = "${var.project}-${var.environment}-observability-lt"
+
+  vpc_security_group_ids = [
+    aws_security_group.node_shared.id,
+    var.observability_security_group_id
+  ]
+
+  metadata_options {
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+    http_endpoint               = "enabled"
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name          = "${var.project}-${var.environment}-observability-node"
+      Environment   = var.environment
+      Project       = var.project
+      "Patch Group" = aws_ssm_patch_group.eks_nodes.patch_group
+    }
+  }
+
+  tags = {
+    Name        = "${var.project}-${var.environment}-observability-lt"
+    Environment = var.environment
+    Project     = var.project
+  }
+}
+
+# app node group
 resource "aws_eks_node_group" "apps" {
   cluster_name    = aws_eks_cluster.devsecops.name
   node_group_name = "${var.project}-${var.environment}-apps"
@@ -390,6 +481,7 @@ resource "aws_eks_node_group" "apps" {
   }
 }
 
+# isolated node group
 resource "aws_eks_node_group" "isolated" {
   cluster_name    = aws_eks_cluster.devsecops.name
   node_group_name = "${var.project}-${var.environment}-isolated"
@@ -435,6 +527,47 @@ resource "aws_eks_node_group" "isolated" {
   }
 }
 
+# observability node group
+resource "aws_eks_node_group" "observability" {
+  cluster_name    = aws_eks_cluster.devsecops.name
+  node_group_name = "${var.project}-${var.environment}-observability"
+  node_role_arn   = aws_iam_role.observability_node.arn
+  subnet_ids      = [var.private_subnet_ids[0]]
+  instance_types  = ["t3.large"]
+  ami_type        = "AL2023_x86_64_STANDARD"
+  capacity_type   = "ON_DEMAND"
+
+  launch_template {
+    id      = aws_launch_template.observability.id
+    version = aws_launch_template.observability.latest_version
+  }
+
+  scaling_config {
+    desired_size = 1
+    min_size     = 1
+    max_size     = 1
+  }
+
+  labels = {
+    role        = "observability"
+    environment = var.environment
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.observability_node_eks_worker,
+    aws_iam_role_policy_attachment.observability_node_ecr,
+    aws_iam_role_policy_attachment.observability_node_cni,
+    aws_iam_role_policy_attachment.observability_node_ssm
+  ]
+
+  tags = {
+    Name        = "${var.project}-${var.environment}-observability-node"
+    Environment = var.environment
+    Project     = var.project
+  }
+}
+
+# cluster to nodes traffic
 resource "aws_vpc_security_group_ingress_rule" "cluster_sg_from_nodes" {
   security_group_id            = aws_eks_cluster.devsecops.vpc_config[0].cluster_security_group_id
   referenced_security_group_id = aws_security_group.node_shared.id
@@ -444,7 +577,6 @@ resource "aws_vpc_security_group_ingress_rule" "cluster_sg_from_nodes" {
     Name = "${var.project}-${var.environment}-cluster-sg-from-nodes"
   }
 }
-
 resource "aws_vpc_security_group_egress_rule" "nodes_to_cluster_sg" {
   security_group_id            = aws_security_group.node_shared.id
   referenced_security_group_id = aws_eks_cluster.devsecops.vpc_config[0].cluster_security_group_id
@@ -475,6 +607,7 @@ resource "aws_vpc_security_group_ingress_rule" "nodes_from_cluster_sg" {
   }
 }
 
+# ebs csi
 resource "aws_eks_addon" "ebs_csi" {
   cluster_name                = aws_eks_cluster.devsecops.name
   addon_name                  = "aws-ebs-csi-driver"

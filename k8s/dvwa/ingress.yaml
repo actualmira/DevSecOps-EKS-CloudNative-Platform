@@ -9,8 +9,8 @@ metadata:
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
     alb.ingress.kubernetes.io/ssl-redirect: '443'
     alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
-    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:eu-west-1:011555818509:certificate/d4a81a11-25fc-4a91-bea4-389cb92bdb1c"
-    alb.ingress.kubernetes.io/wafv2-acl-arn: "arn:aws:wafv2:eu-west-1:011555818509:regional/webacl/devsecops-dev-dvwa-waf/cddef238-1555-40e4-a611-22ee4f4ffcbb"
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:eu-west-1:011555818509:certificate/8c8836fc-de57-4a04-95c1-0f1b067d3fc9"
+    alb.ingress.kubernetes.io/wafv2-acl-arn: "arn:aws:wafv2:eu-west-1:011555818509:regional/webacl/devsecops-dev-dvwa-waf/c2b842c1-0817-4d28-b464-db32c11df41a"
     alb.ingress.kubernetes.io/load-balancer-attributes: 'routing.http.drop_invalid_header_fields.enabled=true'
     alb.ingress.kubernetes.io/listener-attributes.HTTP-80: 'routing.http.response.server.enabled=false'
     alb.ingress.kubernetes.io/listener-attributes.HTTPS-443: >-

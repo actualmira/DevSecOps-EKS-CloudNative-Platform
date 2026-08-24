@@ -1,0 +1,24 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: dvwa-alerts
+  namespace: dvwa
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: dvwa.rules
+      rules:
+        - alert: DVWAHighCPU
+          expr: >
+            (
+              sum(rate(container_cpu_usage_seconds_total{namespace="dvwa", container="dvwa"}[5m])) by (pod)
+              /
+              sum(kube_pod_container_resource_limits{namespace="dvwa", container="dvwa", resource="cpu"}) by (pod)
+            ) * 100 > 80
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "DVWA pod high CPU usage"
+            description: "DVWA pod {{ $labels.pod }} is using more than 80% of its allocated CPU limit."

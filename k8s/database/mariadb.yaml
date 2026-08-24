@@ -2,6 +2,9 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: database
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: v1.35
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -20,7 +23,11 @@ data:
     #!/bin/sh
     MYSQL_PWD="${MARIADB_ROOT_PASSWORD}" mysql -u root <<EOF
     CREATE USER IF NOT EXISTS 'healthcheck'@'127.0.0.1' IDENTIFIED BY '${HEALTHCHECK_PASSWORD}';
+    CREATE USER IF NOT EXISTS 'exporter'@'127.0.0.1' IDENTIFIED BY '${EXPORTER_PASSWORD}' WITH MAX_USER_CONNECTIONS 3;
     ALTER USER 'healthcheck'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('${HEALTHCHECK_PASSWORD}');
+    ALTER USER 'exporter'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('${EXPORTER_PASSWORD}');
+    GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'exporter'@'127.0.0.1';
+    GRANT SELECT ON performance_schema.* TO 'exporter'@'127.0.0.1';
     REVOKE ALL PRIVILEGES ON dvwa.* FROM '${MARIADB_USER}'@'%';
     GRANT SELECT, INSERT, UPDATE ON dvwa.* TO '${MARIADB_USER}'@'%';
     DROP USER IF EXISTS 'root'@'%';
@@ -111,6 +118,11 @@ spec:
                 secretKeyRef:
                   name: mariadb-secret
                   key: healthcheck-password
+            - name: EXPORTER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb-monitoring-secret
+                  key: exporter-password
           ports:
             - containerPort: 3306
           resources:
@@ -129,6 +141,40 @@ spec:
               mountPath: /tmp
             - name: run
               mountPath: /var/run/mysqld
+        - name: mysqld-exporter
+          image: prom/mysqld-exporter:v0.15.1
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65534
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop:
+                - ALL
+          args:
+            - --no-collect.info_schema.innodb_tablespaces
+            - --no-collect.perf_schema.file_instances
+            - --no-collect.slave_status
+            - --mysqld.address=127.0.0.1:3306
+            - --mysqld.username=exporter
+          env:
+            - name: MYSQLD_EXPORTER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb-monitoring-secret
+                  key: exporter-password
+          ports:
+            - containerPort: 9104
+              name: metrics
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: init-script
           configMap:
@@ -154,10 +200,16 @@ kind: Service
 metadata:
   name: mariadb-svc
   namespace: database
+  labels:
+    app: mariadb
 spec:
   selector:
     app: mariadb
   ports:
     - port: 3306
       targetPort: 3306
+      name: mysql
+    - port: 9104
+      targetPort: 9104
+      name: metrics
   clusterIP: None

@@ -1,0 +1,110 @@
+controller:
+  type: daemonset
+  tolerations:
+    - key: "workload"
+      operator: "Equal"
+      value: "isolated"
+      effect: "NoSchedule"
+  volumes:
+    extra:
+      - name: alloy-positions
+        hostPath:
+          path: /var/lib/alloy-positions
+          type: DirectoryOrCreate
+
+alloy:
+  storagePath: /var/lib/alloy-positions
+  mounts:
+    varlog: true
+    extra:
+      - name: alloy-positions
+        mountPath: /var/lib/alloy-positions
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  configMap:
+    create: true
+    content: |-
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_pod_node_name"]
+          regex         = sys.env("K8S_NODE_NAME")
+          action        = "keep"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app"]
+          target_label  = "app"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name"]
+          separator     = "/"
+          target_label  = "job"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name", "__meta_kubernetes_pod_uid"]
+          separator     = "_"
+          target_label  = "__tmp_pod_dir"
+          replacement   = "$1_$2_$3"
+        }
+        rule {
+          source_labels = ["__tmp_pod_dir", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "__path__"
+          replacement   = "/var/log/pods/$1/$2/*.log"
+        }
+      }
+      loki.source.file "pod_logs" {
+        targets    = discovery.relabel.pod_logs.output
+        forward_to = [loki.process.pod_logs.receiver]
+      }
+      loki.process "pod_logs" {
+        forward_to = [loki.write.default.receiver]
+        stage.static_labels {
+          values = {
+            cluster = "devsecops-dev",
+          }
+        }
+      }
+      loki.write "default" {
+        endpoint {
+          url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
+        }
+      }
+
+rbac:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources:
+        - nodes
+        - pods
+        - namespaces
+        - services
+        - endpoints
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["apps"]
+      resources:
+        - replicasets
+      verbs: ["get", "list", "watch"]
+
+serviceAccount:
+  create: true

@@ -45,41 +45,6 @@ resource "aws_kms_alias" "cloudtrail" {
   target_key_id = aws_kms_key.cloudtrail.key_id
 }
 
-#Vault
-resource "aws_kms_key" "vault_unseal" {
-  description             = "KMS key for Vault auto-unseal"
-  deletion_window_in_days = 7
-  enable_key_rotation     = true
-
-  tags = {
-    Name        = "${var.project}-${var.environment}-vault-unseal-key"
-    Environment = var.environment
-    Project     = var.project
-  }
-}
-
-resource "aws_kms_alias" "vault_unseal" {
-  name          = "alias/${var.project}-${var.environment}-vault-unseal"
-  target_key_id = aws_kms_key.vault_unseal.key_id
-}
-
-#ectd
-resource "aws_kms_key" "eks_secrets" {
-  description             = "KMS key for EKS etcd secrets envelope encryption"
-  deletion_window_in_days = 7
-  enable_key_rotation     = true
-
-  tags = {
-    Name        = "${var.project}-${var.environment}-eks-secrets-key"
-    Environment = var.environment
-    Project     = var.project
-  }
-}
-
-resource "aws_kms_alias" "eks_secrets" {
-  name          = "alias/${var.project}-${var.environment}-eks-secrets"
-  target_key_id = aws_kms_key.eks_secrets.key_id
-}
 
 #session logging
 resource "aws_kms_key" "ssm_session_logs" {
@@ -100,7 +65,7 @@ resource "aws_kms_key" "ssm_session_logs" {
         Resource = "*"
       },
       {
-        Sid    = "Allow CloudWatch Logs to use the key"
+        Sid    = "Allow CloudWatch Logs"
         Effect = "Allow"
         Principal = {
           Service = "logs.${var.aws_region}.amazonaws.com"
@@ -149,7 +114,7 @@ data "aws_iam_policy_document" "config_kms_policy" {
   }
 
   statement {
-    sid    = "Allow AWS Config to use the key"
+    sid    = "Allow AWS Config"
     effect = "Allow"
 
     principals {
@@ -173,7 +138,7 @@ data "aws_iam_policy_document" "config_kms_policy" {
 }
 
 resource "aws_kms_key" "config" {
-  description             = "KMS key for AWS Config configuration snapshots"
+  description             = "KMS key for AWS Config"
   deletion_window_in_days = 7
   enable_key_rotation     = true
   policy                  = data.aws_iam_policy_document.config_kms_policy.json
@@ -188,4 +153,49 @@ resource "aws_kms_key" "config" {
 resource "aws_kms_alias" "config" {
   name          = "alias/${var.project}-${var.environment}-config"
   target_key_id = aws_kms_key.config.key_id
+}
+
+# Loki
+resource "aws_kms_key" "loki" {
+  description             = "KMS key for Loki S3 log encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Permission for IAM Users"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow S3"
+        Effect = "Allow"
+        Principal = {
+          Service = "s3.amazonaws.com"
+        }
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:Decrypt"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+
+  tags = {
+    Name        = "${var.project}-${var.environment}-loki-key"
+    Environment = var.environment
+    Project     = var.project
+  }
+}
+
+resource "aws_kms_alias" "loki" {
+  name          = "alias/${var.project}-${var.environment}-loki-key"
+  target_key_id = aws_kms_key.loki.key_id
 }

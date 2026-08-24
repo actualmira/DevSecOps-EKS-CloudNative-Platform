@@ -77,7 +77,12 @@ resource "aws_ecr_repository_policy" "dvwa" {
 }
 
 # PULL-THROUGH CACHE RULE
+data "aws_secretsmanager_secret" "dockerhub" {
+  name = "ecr-pullthroughcache/${var.project}-${var.environment}-dockerhub"
+}
+
 resource "aws_ecr_pull_through_cache_rule" "docker_hub" {
   ecr_repository_prefix = "docker-hub"
   upstream_registry_url = "registry-1.docker.io"
+  credential_arn        = data.aws_secretsmanager_secret.dockerhub.arn
 }
