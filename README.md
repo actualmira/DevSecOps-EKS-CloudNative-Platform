@@ -4,7 +4,7 @@ Defense-in-depth security for cloud-native applications on AWS EKS covering thre
 ---
 
 ## Project Overview 
-In this project, I implemented a defense-indepth security architecture for cloud-native applications across phases; from threat modelling to Kubernetes security controls: Network policies, RBAC, Pod Security Standards, and Gatekeeper policy as code, to Secrets management with HashiCorp Vault and ESO, to Runtime security with Falco, to AWS security controls: IAM, KMS, Security Groups, GuardDuty, CloudTrail, Config, etc, and automated threat detection and response with EventBridge and Lambda, to Observability with Prometheus, Grafana, and Loki, through to supply chain and CI/CD security controls including, branch protection, workflow seperation with least privilege IAM roles, SBOM, image signing, security scanning, and GitOps with ArgoCD. I will be using DVWA as the application and MariaDB as the database.
+In this project, I implemented a defense-indepth security architecture for cloud-native applications across phases; from threat modelling to Kubernetes security controls: Network policies, RBAC, Pod Security Standards, and Gatekeeper policy as code, to Secrets management with HashiCorp Vault and ESO, to Runtime security with Falco, to AWS security controls: IAM, KMS, Security Groups, GuardDuty, CloudTrail, Config, etc, and automated threat detection and response with EventBridge and Lambda, to Observability with Prometheus, Grafana, and Loki, through to supply chain and CI/CD security controls including, branch protection, workflow seperation with least privilege IAM roles, SBOM, image signing, security scanning, and GitOps with ArgoCD. I used DVWA as the application and MariaDB as the database.
 
 
 
@@ -329,134 +329,49 @@ The first block catches when run as non root is not enforced either at the pod o
 
 ## Vault and External Secrets Operator
 
+- I implemented Vault with ESO for secrets management. This prevents hardcoding of secrets in config files, manifests or any source codes. Vault stores secrets encrypted at rest with a full audit log of every read, write, and authentication event. It follows the principle of least privilege because acess is controlled by policies that restrict exactly which paths a client can read.
 
-This phase is an extension of vault's setup I started in minikube. I deployed Vault on EKS in the isolated node group. I configured it to use AWS KMS for auto-unseal on every pod restart using the IRSA to call KMS to decrypt its own root encryption key and unseal itself automatically without any human intervention.
+- I implemented ESO as the only client that can connect directly to Vault. I chose ESO to completely isolate application pods from Vault at runtime. Neither of the pods hold Vault tokens, can authenticate to Vault, or have any knowledge of the secrets backend; they read normal Kubernetes Secrets that ESO manages on their behalf. This eliminates the risk of Vault token being exposed through application vulnerabilities. It also removes the need for Vault Agent sidecars in every pod, and enforces a strict separation between infrastructure secret management and application runtime.
 
-I attached the KMS unseal key permission on Vault's dedicated IRSA role and not the node's IAM role. This eliminates the risk of a compromised MariaDB pod which runs in the same node inheriting the permission to call KMS and potentially unseal Vault from the outside. 
+- I created a path scoped read-only ESO policy with a dedicated vault role for each path that grants ESO read access only to the allowed secret path.
 
-I also configured two Vault audit backends: a file backend writing to the Vault pod's local filesystem, and a syslog backend. The two backends will prevent an attacker from exploiting the default fail-closed nature of Vault's audit system which blocks the request entirely if the audit backend is unreachable thereby causing a DoS.
+- **SecretStore and ExternalSecret**
+  
+I configured namespace restricted Secret Stores for all secrets. A namespaced SecretStore cannot be used by other namespaces, which prevents a compromised pod in a different namespace from leveraging it to read secrets from another namespace. For mariadb pod and the mysqld-exporter which lives in the same namespace, I implemented least privilege by configuring different secrets stores and eso roles for them, restricting their access to their specific secret paths
 
-I enabled ESO to Vault traffic to run over TLS. This follows Zero Trust principle because if the traffic is unencrypted, an attacker with network access inside the cluster can intercept credentials in transit without needing to compromise either service.
+I enabled a refreshInterval of 1h on the external secret so that ESO polls Vault every hour. If the password is rotated in Vault, ESO will automatically update the secrets within the hour automatically without requiring the pods to restart.
 
-I initially used kubernetes reflector to reflect the cert-manager certificate to ESO namespace. I moved away from it because it mirrors the entire Kubernetes Secret, which for a TLS certificate includes the private key alongside the public certificate which ESO needs. Distributing the private key to the ESO namespace unnecessarily is a real exposure where if the ESO namespace is compromised, the attacker gets the private key and can impersonate Vault.
+- In this development environment where I do a daily destroy of the infrastructure for cost management, key rotation is not critical. So I used static keys stored in Vault KV for the database root password, application database user, mysqld-exporter credentials, and Grafana admin password. ESO syncs these into Kubernetes Secrets which the pods consume at runtime eliminating hardcoded credentials in manifests or values files.
 
-I resolved to using trust manager which distributes only the public certificate into a ConfigMap in the ESO namespace.  I also scoped the trust bundle distribution to only the ESO namespace following the principle of least privilege.
+- In a production environment where static credentials can introduce critical risks like credential theft, insider threat, and long exposure windows, I would enable the Vault Database Secrets Engine and configure Vault to take ownership of the database root password. With this, Vault can generate a complex random password, store it internally, and overwrite the original used in init phase. This will eliminate any engineer or admin knowledge of the root password. It can only be accessed when necessary through Vault's API by an authenticated identity with explicit policy permission and access captured in audit logging.
 
+- I would also enable dynamic generation of short-lived database user credentials on request using Vault's dynamic roles. When the mariadb pod starts, ESO will request credentials from Vault, Vault will then connect to MariaDB and create a temporary user with time-to-live. This will eliminate re-using of credentials and limit the attack window from a stolen token.
 
-Although I stored the credentials for the application pods as manually created Kubernetes Secrets which follows the security principle of not hardcoding them in manifests, it is still a risk because anyone with kubectl get secret access in the production namespace can read the database password in plain base64. There is no audit trail of who accessed what, no automatic rotation, and no way to revoke access without manually deleting and recreating secrets. I solved this by moving the credentials out of Kubernetes entirely and into [Vault](k8s/vault/vault-values.yaml), with the [External Secrets Operator](k8s/eso/eso-values.yaml) acting as the bridge between them.
+- **Network policy for ESO and Vault**
+  
+I implemented default deny for vault and eso namespaces. I then allowed traffic following the principle of least privilege. For [vault](k8s/vault/vault-np.yaml), I configured ingress on 8200/TCP for ESO (restricted to eso namespace and pod label only). Egress to 53 TCP/UDP for DNS resolution and 443/TCP for Vault's Kubernetes auth method to verify ESO's service account token before granting access.
 
-Vault stores secrets encrypted at rest with a full audit log of every read, write, and authentication event. It follows the peinciple of least privilege because acess is controlled by policies that restrict exactly which paths a client can read.
+- For [ESO NetworkPolicy](k8s/eso/eso-np.yaml), I configured egress on 53 TCP/UDP for DNS and 443/TCP to the Kubernetes API for all three pods. For the ESO controller pod, I configured 8200/TCP egress to the Vault API restricted to the vault namespace and pod label only. ESO webhook ingress on 10250/TCP for Kubernetes API server admission calls. ESO cert-controller egress on 53 UDP/TCP for DNS and 443/TCP to the Kubernetes API for Validating Webhook Configuration.
 
+- **Vault IRSA and KMS**
+  
+- I deployed Vault on EKS in the isolated node group. I configured it to use AWS KMS for auto-unseal on every pod restart using the IRSA to call KMS to decrypt its own root encryption key and unseal itself automatically without any human intervention.
 
-I implemented ESO as the only client that can connect directly to Vault. I chose ESO  to completely isolate application pods from Vault at runtime. Neither of the pods hold Vault tokens, can authenticate to Vault, or have any knowledge of the secrets backend; they read normal Kubernetes Secrets that ESO manages on their behalf. This eliminates the risk of Vault token being exposed through application vulnerabilities. It also removes the need for Vault Agent sidecars in every pod, and enforces a strict separation between infrastructure secret management and application runtime. 
+- I attached the KMS unseal key permission on Vault's dedicated IRSA role and not the node's IAM role. This eliminates the risk of a compromised MariaDB pod which runs in the same node inheriting the permission to call KMS and potentially unseal Vault from the outside. The KMS key policy also provides a second enforcement layer that restricts which IAM principal can use the key.
 
-```bash
-vault auth enable kubernetes
+- I also configured Vault file audit backends to write to the Vault pod's local filesystem. With this enabled, every request and response Vault processes is logged in structured JSON with HMAC-hashed tokens, so the audit trail cannot be tampered without detection. 
 
-vault write auth/kubernetes/config \
-  kubernetes_host="https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT" \
-  kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
-  issuer="https://kubernetes.default.svc.cluster.local"
-```
+- In production I would configure the file backend to ship to an SIEM tool for monitoring, compliance reporting, and correlation with other security events. I would also configure a second syslog backend with an rsyslog sidecar, to ship audit events to Loki through Alloy for real-time correlation in Grafana alongside application logs and Falco alerts.
 
-I created an ESO policy that grants ESO read access only to the production secret path. ESO cannot write to Vault, cannot read secrets from other paths, and cannot modify policies or roles.
+- The two backends will also prevent an attacker from exploiting the default fail-closed nature of Vault's audit system which blocks the request entirely if the audit backend is unreachable thereby causing a DoS.
 
-```hcl
-path "secret/data/production/*" {
-  capabilities = ["read"]
-}
-```
+- I enabled ESO to Vault traffic to run over TLS. This follows Zero Trust principle because if the traffic is unencrypted, an attacker with network access inside the cluster can intercept credentials in transit without needing to compromise either service.
 
-I created a vault role for ESO. The vault role defines which Kubernetes identity is allowed to authenticate and what policy they receive. Only the eso-sa ServiceAccount from the eso namespace can authenticate using this role. I configured a 1 hour token TTL so that even if a token were somehow intercepted, it will expire quickly and cannot be reused indefinitely.
-```bash
-vault write auth/kubernetes/role/eso \
-  bound_service_account_names=eso-sa \
-  bound_service_account_namespaces=eso \
-  policies=eso-policy \
-  token_ttl=1h
-```
+- I initially used kubernetes reflector to reflect the cert-manager certificate to ESO namespace. I moved away from it because it mirrors the entire Kubernetes Secret, which for a TLS certificate, includes the private key alongside the public certificate which ESO needs. Distributing the private key to the ESO namespace unnecessarily is a real exposure where if the ESO namespace is compromised, the attacker gets the private key and can impersonate Vault.
 
-I configured ESO with a dedicated ServiceAccount, namespaced SecretStore, and a restrictive NetworkPolicy that limits its egress to Vault and the Kubernetes API only.
+- I resolved to using trust manager which distributes only the public certificate into a ConfigMap in the ESO namespace.  I also scoped the trust bundle distribution to only the ESO namespace following the principle of least privilege.
 
-#### Dedicated ServiceAccounts for ESO and Vault
-I created dedicated service accounts for [ESO](k8s/eso/eso-sa.yaml) and [Vault](k8s/vault/vault-rbac.yaml) instead of using the one created by Helm because ServiceAccounts created by Helm can be modified during upgrades which can silently apply changes made by chart maintainers without any review. This can lead to a privilege creep that will be invisible. Also, running helm uninstall will delete everything Helm owns including the ServiceAccount. Any Vault role bound to that identity would be broken and would require manual rebuilding.
-
-The ServiceAccounts are intentionally empty with no Kubernetes API permissions. The vault-server-binding ClusterRoleBinding created by the Vault Helm chart grants Vault's ServiceAccount the system:auth-delegator for TokenReview calls.
-
-#### Network policy for ESO and Vault
-I implemented default deny for vault and eso namespaces. I then allowed traffic following the principle of least privilege. For [vault](k8s/vault/vault-np.yaml), I configured ingress on 8200/TCP for ESO (restricted to eso namespace and pod label only). Egress to 53 TCP/UDP for DNS resolution and 8443/TCP for Kubernetes API calls. 
-
-I seperated [ESO NetworkPolicy](k8s/eso/eso-np.yaml) per component; controller, webhook, and certcontroller. For ESO Controller, egress on 53 UDP/TCP, 8200/TCP to Vault API (restricted to vault namespace and pod label only), Port 443/TCP  for Kubernetes API for TokenReview and resource watching. ESO Webhook ingress: 10250 TCP for Kubernetes API server admission calls. ESO CertController egress: 53 UDP/TCP for DNS, 443/TCP to Kubernetes API for ValidatingWebhookConfiguration updates.
-
-
-#### SecretStore and ExternalSecret
-I configured the [SecretStore](k8s/eso/production-secret-store.yaml) which tells ESO where Vault is and how to authenticate. I configured it to live in the production namespace and scoped it to application workloads only. A namespaced SecretStore cannot be used by other namespaces, which prevents a compromised pod in a different namespace from leveraging it to read production secrets.
-
-```yaml
-apiVersion: external-secrets.io/v1
-kind: SecretStore
-metadata:
-  name: vault-secret-store
-  namespace: production
-spec:
-  provider:
-    vault:
-      server: "http://vault.vault.svc.cluster.local:8200"
-      path: "secret"
-      version: "v2"
-      auth:
-        kubernetes:
-          mountPath: "kubernetes"
-          role: "eso"
-```
-
-I also configured the [ExternalSecret](k8s/eso/production-external-secret.yaml) `mariadb-secret-eso` that will be created by ESO which contains the credential fields synced from Vault. I enabled a refreshInterval of 1h so that ESO polls Vault every hour. If the password is rotated in Vault, `mariadb-secret-eso` will be updated within the hour automatically and it will not require the pods to restart.
-
-```yaml
-spec:
-  refreshInterval: 1h
-  secretStoreRef:
-    name: vault-secret-store
-    kind: SecretStore
-  target:
-    name: mariadb-secret-eso
-    creationPolicy: Owner
-  data:
-    - secretKey: root-password
-      remoteRef:
-        key: production/mariadb
-        property: root-password
-    - secretKey: db-password
-      remoteRef:
-        key: production/mariadb
-        property: db-password
-    - secretKey: db-user
-      remoteRef:
-        key: production/mariadb
-        property: db-user
-    - secretKey: healthcheck-password
-      remoteRef:
-        key: production/mariadb
-        property: healthcheck-password
-```
-
-I then updated both MariaDB and DVWA manifests to reference mariadb-secret-eso instead of the manually created mariadb-secret. I deleted the manually created kubernetes secret and the pods to confirm they can sync thier secrets from `mariadb-secret-eso`.
-
-![secret_store_running](screenshots/phase1/secret_store_running.png)
-*secret created and synced*
-
-![pods_after_eso_secret](screenshots/phase1/pods_after_eso_secret.png)
-*pods successfully started and running*
-
-#### Validating ESO Capability during Vault Unavailability
-
-To test that ESO correctly caches synced secrets as real Kubernetes Secret objects stored in etcd. I scaled down Vault pod to 0 and deleted MariaDB to simulate a restart. MariaDB succesfully read the cached mariadb-secret-eso from etcd and restarted without any Vault connection.
-
-![pods_after_vault_turnoff](screenshots/phase1/pods_after_vault_turnoff.png)
-
-![mariadb_secret_synced](screenshots/phase1/mariadb_secret_synced.png)
-
-
+- This encryption is at the application layer. In a Zero trust production environment with many microservices, I can enable Vault PKI and configure Vault as an intermediate CA to provide dynamic certificate for the cluster service mesh for mutual authentication and network level encryption of all microservices connection.
 
 ---
 
@@ -632,6 +547,12 @@ I provisioned the [EKS cluster](terraform/modules/eks/main.tf) with both public 
 
 I enabled control plane logging for the api, audit, and authenticator log types. The api and audit logs capture who accessed the cluster and what they did, and the authenticator captures IAM-to-Kubernetes identity mapping. These logs stream natively into Amazon CloudWatch for real time monitoring and visualization.
 
+- **Node Group IAM Roles**
+  
+I created separate IAM roles for each node group: apps, isolated, and observability. The isolated node runs Vault which needs access to KMS endpoint which the other nodes do not need. By separating the roles, I can contain the blast radius to only what each node legitimately needs.
+
+In a high availability production environment, this separation will also enable targeted incident response. If the apps node is compromised, I can revoke its IAM role immediately without touching the isolated or observability node groups.
+
 - **IMDSv2 Enforcement**
   
 I enforced IMDSv2 on the nodes launch templates with a hop limit of 1. The Instance Metadata Service at 169.254.169.254 returns the node's live IAM role credentials to any caller. With IMDSv1, an attacker can exploit an SSRF vulnerability in DVWA which is intentionally vulnerable to make the server issue an HTTP GET to the metadata endpoint and steal the node's AWS credentials with no authentication. IMDSv2 will prevent this because it requires a PUT request to obtain a session token first. Also, with a hop limit of 1, a compromised pod cannot get a return traffic from the IMDS.
@@ -668,7 +589,7 @@ The SQL Database managed rule group blocks known SQL injection patterns at the A
 
 - With CloudWatch metrics and sampled requests enabled, WAF will store a sample of the requests that matched each rule in the WAF console, and will provide visibility into the actual request content for investigation. In a production environment, I can combine this with full WAF logging to Kinesis Firehose to capture all requests.
 
-- I configured the ALB to terminate TLS using a certificate I generated with cert-manager and imported into ACM with ALB security policy enforcing TLS 1.3 only at the connection level. This eliminates known weaknesses like CBC mode ciphers vulnerabilities that can be seen with TLS 1.2 or lower versions. TLS 1.3 eliminates all of them, has a faster handshake, and provides forward secrecy by default on every connection.
+- I configured the ALB to terminate TLS using a certificate I generated with cert-manager and imported into ACM, with ALB security policy enforcing TLS 1.3 only at the connection level. This eliminates known weaknesses like CBC mode ciphers vulnerabilities that can be seen with TLS 1.2 or lower versions. TLS 1.3 also has a faster handshake and provides forward secrecy by default on every connection. In a production environment with a registered domain, I would configure ACM to provision and automatically renew a publicly trusted ALB certificate for the domain.
 
 - I stripped the ALB response header to enforce the security principle of Reconnaissance defense through Information Obscurity. DVWA is a pre-built image that I do not control, I would need to either configure the server inside the DVWA image to suppress the header, which requires rebuilding the image, or configure a response transformation at the third-party ingress controller level like envoy or NGINX.
 
@@ -676,11 +597,19 @@ The SQL Database managed rule group blocks known SQL injection patterns at the A
 
 - **GuardDuty**
   
-I configured guardduty for account wide threat detection. It monitors CloudTrail API call logs, VPC Flow Logs, and DNS query logs. I enabled runtime monitoring with eks addon management and ec2 agent management, audit logs to provide visibility into events at the Kubernetes control plane like privilege escalations, suspicious exec commands, or abnormal API call patterns from service accounts, s3 data events, ebs malware protection, and lambda network logs monitoring.
+I configured guardduty for account wide threat detection. It monitors CloudTrail API call logs, VPC Flow Logs, and DNS query logs. I chose RUNTIME MONITORING alonside EKS ADDON MANAGEMENT and EC2 AGENT MANAGEMENT over EKS RUNTIME MONITORING because EKS Runtime Monitoring only monitors threats within the Kubernetes layer. Runtime Monitoring covers both the container layer AND the underlying EC2 host, making it able to detect threats that have already escaped the container boundary and are executing directly on the node OS.
+
+I enabled EKS AUDIT LOGS to provide visibility into events at the Kubernetes control plane like privilege escalations, suspicious exec commands, or abnormal API call patterns from service accounts.
+
+I also enabled S3 DATA EVENTS to detect unauthorized access or exfiltration of sensitive data from my S3 buckets, EBS MALWARE PROTECTION to scan volumes attached to the EKS nodes for malware that could persist across container restarts, and Lambda network activity monitoring to detect anomalous outbound connections from the Lambda remediation functions that could indicate a compromised function making unauthorized calls.
 
 - **AWS Config**
 
-I also enabled AWS config to detect misconfigurations for autoremediation and maintaning the required security posture. I created a dedicated KMS customer-managed key for the Config S3 bucket rather than reusing the CloudTrail key or any other existing key. The is to contain blast radius in a case of compromise.
+I also enabled AWS config to detect misconfigurations for autoremediation and maintaining the required security posture. 
+
+My config rules monitor for when ssh port, database, and vault sensitive ports are configured open and autoremedates to protect from accidental or deliberate exposure. It also monitors and alerts when  EBS encryption is  disabled for human intervention.
+
+I created a dedicated KMS customer-managed key for the Config S3 bucket rather than reusing the CloudTrail key or any other existing key. The is to contain blast radius in a case of compromise.
 
 - **Security Hub**
   
@@ -695,7 +624,7 @@ I used inline zip files for the lambda codes which are deployed through terrafor
 
 For the S3 account-level Block Public Access remediation, I used an SSM Automation document (AWSConfigRemediation-ConfigureS3PublicAccessBlock) rather than a Lambda function. The removes the maintenance burden because AWS owns and maintains that SSM document. 
 
-The CloudTrail Config rule evaluates and fires when any trail is NON COMPLIANT but I configured the remediation handler to only auto-remediate the main trail. This is because there are justifications why a trail may need to be discontinued and enforcing autoremediation on all trails is not the right call. I enforced it on the main trail because it captures core security information and should never be disabled.
+The CloudTrail Config rule evaluates and fires when any trail is NON COMPLIANT but I configured the remediation handler to only auto-remediate the main trail. This is because there are justifications why a trail may need to be discontinued and enforcing autoremediation on all trails is not the right call. I enforced it on the main trail because it captures core security information and should never be disabled. The config evaluates on all trails for visibility but only triggers autoremediation on the main trail.
 
 I configured the instance credential exfiltration remediation to send sns alert instead of revoking the node role. This is because this is a dev environment and there’s no high availability. Revoking the node role will cause every pod on that node to loose access to AWS causing denial of service. In a production environment with multi availability, I should configure it to revoke the node role.
 
@@ -703,19 +632,57 @@ Similarly, I moved the threats that requires automated eks node isolation to sen
 
 I configured the compromised credential finding (UnauthorizedAccess:IAMUser/*) to be auto-remediated by applying a deny policy to the IAM role or deactivating the access key. This is because for that threat to be flagged, AWS's threat intelligence has already made the determination with high confidence. A human reviewing the finding before remediating widens the window between detection and containment, and this leaves the credentials active giving the attacker time to create new credentials, escalate privileges, or exfiltrate data. it denies the specific session or deactivates the specific key, so the blast radius is contained.
 
-### Phase 4E: ECR Hardening
+### H: ECR Hardening
 
 I used private repository for dvwa because it serves as my custom application which should never be in a public repository 
 
 I configured Pull-Through cache for other upstream images because they’re from trusted open source and I do not need to modify anyone. Also, none of the images has internet dependency at runtime. Creating a private repository for them will add a maintenance burden where I would need to manually update them as new versions are released
 
 
+---
+
+## Observability and Monitoring
+
+### A: Kube-Prometheus-Stack
+
+In the observability node, I deployed Prometheus and Grafana for metrics collection and dashboard visualization.
+
+- I configured a ServiceMonitor for MariaDB to collect application specific metrics: slow queries, active connection counts, and buffer pool utilisation, through the mysqld-exporter sidecar. These metrics reveal database problems before they surface as application errors. 
+ 
+- DVWA is a plain PHP application and exposes no metrics endpoint, so a ServiceMonitor is not applicable. So, I configured a PrometheusRule that evaluates metrics cAdvisor already collects automatically from the node for every running container.
+
+- I didn't measure CPU against a full core because it would give a misleading percentage; I divided actual CPU usage by the CPU limit configured for the container to get a true saturation figure. The rule will fire a critical alert when DVWA reaches 80% of its allocated CPU for more than two minutes, providing early detection before the pod becomes unresponsive.
+
+- This covers both operational overload and a potential denial of service attempt against the vulnerable application. In a production environment, I would also configure a Horizontal Pod Autoscaler to automatically scale a new DVWA pod before the existing one becomes saturated, so that the cluster can absorb the load while the alert is being investigated.
+
+- I configured severity-based AlertManager routing to forward only critical alerts to an SNS topic using an IRSA-scoped role ARN. While Warning and info alerts will remain in Grafana for visibility. 
+
+- In a production environment, I would also route AlertManager Watchdog to a dead man's switch service like PagerDuty to alert when AlertManager alert stops firing.
+
+- For Grafana authentication, I configured grafana to sync the admin credentials through an ExternalSecret pulling from Vault. This way, the Grafana admin password is managed by Vault's access control, audited through Vault's audit log, and rotated without touching the Kubernetes cluster directly.
+
+- In a production environment, I can also utilize Grafana's built in RBAC for restricting dashboard and datasource access per authenticated user. This will restrict which teams can query which namespaces in Loki and which metrics in Prometheus.
+In this project, I used port forwarding to access the dashboard, I could also also enforce TLS 1.3 on grafana connections through the ALB, and also restrict the security group ingress from the security team ipcidr block
 
 
+### B: Loki and Alloy
 
+- I deployed Loki in Simple Scalable mode, which splits the monolithic Loki binary into separate write, read, and backend components with each running independently and scalable on its own. This will provide the operational flexibility to scale write throughput independently from query performance in cases when log ingestion spikes during a security incident without necessarily increasing query load.
 
+- I configured IRSA and an S3 bucket with KMS encryption for long-term log storage of Loki logs. This IRSA ensures that only Loki with its service account in the observability namespace can write to the S3 bucket. I also included a source VPC condition to ensure that the role can only be assumed from inside the VPC. This protects against an attacker exfiltrating or maliciously corrupting Loki storage from outside the cluster.
 
+- The KMS key policy also ensures that S3 can only encrypt data for Loki's IRSA principal, even if an attacker obtained a different IAM identity, they cannot write to or read the encrypted log data because the KMS key will refuse to generate or decrypt data keys for any identity other than Loki's role.
 
+- I also referenced the SSE-KMS encryption type explicitly in the Loki values file using sse_config pointing to the KMS key ARN. This ensures Loki will fail to write to the S3 bucket if KMS encryption is ever disabled or misconfigured on the bucket and not silently falling back to unencrypted writes. This will protect against a misconfiguration or a deliberate attempt to disable encryption going undetected while logs continue to accumulate without protection.
 
+- For Alloy to function as a log shipper, it needs access to /var/log which is a host-mounted path on the node filesystem. It needs this access to read pod log files directly from disk which captures crash logs from pods that have already died. The default Helm chart also gives Alloy cluster-wide RBAC permissions including read access to Secrets across all namespaces. An attacker who compromises the Alloy container and steals its automatically mounted service account token can use that token directly against the Kubernetes API, bypassing Alloy's config language entirely, and can read every Secret in every namespace. Because Kubernetes Secrets are only base64 encoded, not encrypted at the API level, the credentials will be readable.
 
+- I scoped down these permissions so that even with a stolen token, access is limited to pod metadata, namespaces, and node information. 
 
+- **publishNotReadyAddresses**
+  
+When I first deployed Loki, the read component was stuck in Pending and never became ready. This is because Loki uses memberlist gossip protocol to form a ring where each component knows about every other component in the cluster. A new Loki component at start up, needs to join the ring before the readiness probe can detect it as ready. Kubernetes, by default, only publishes the IP addresses of pods that are ready to the memberlist service.
+
+I enabled publishNotReadyAddresses: true on the memberlist service so that Kubernetes can publish the pod's IP address in the service endpoints even before the pod passes its readiness probe.  
+
+- I disabled Loki canary because this is a development environment where I am already verifying log ingestion manually through Grafana and Falco alert correlation, the canary adds resource consumption and log noise. In a production environment where automated SLA monitoring is required, I would enable it to continuously validate the log pipeline end-to-end and alert when log delivery latency exceeds the acceptable thresholds.
