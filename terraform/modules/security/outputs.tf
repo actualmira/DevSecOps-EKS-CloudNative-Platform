@@ -17,3 +17,6 @@ output "loki_kms_key_id" {
 output "alertmanager_sns_topic_arn" {
   value       = aws_sns_topic.alertmanager.arn
 }
+output "ssm_session_logs_bucket_id" {
+  value = aws_s3_bucket.ssm_session_logs.id
+}

@@ -14,3 +14,4 @@ spec:
     excludedNamespaces:
       - falco
       - kube-system
+

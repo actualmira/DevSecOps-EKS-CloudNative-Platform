@@ -6,6 +6,7 @@ spec:
   match:
     excludedNamespaces:
       - falco
+      - kube-system
     kinds:
       - apiGroups: [""]
         kinds: ["Pod"]

@@ -54,3 +54,6 @@ variable "loki_kms_key_id" {
 variable "alertmanager_sns_topic_arn" {
   type        = string
 }
+variable "ssm_session_logs_bucket_id" {
+  type        = string
+}

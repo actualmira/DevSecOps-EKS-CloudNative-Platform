@@ -85,6 +85,19 @@ falcoctl:
 
 falcosidekick:
   enabled: true
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1234
+    runAsGroup: 1234
+    fsGroup: 1234
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
   replicaCount: 1
   nodeSelector:
     role: observability

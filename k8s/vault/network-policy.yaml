@@ -49,10 +49,20 @@ spec:
           rules:
             dns:
               - matchPattern: "*"
-    - toFQDNs:
-        - matchPattern: "*.kms.eu-west-1.amazonaws.com"
-        - matchPattern: "*.sts.eu-west-1.amazonaws.com"
-        - matchPattern: "*.eu-west-1.eks.amazonaws.com"
+    - toCIDRSet:
+        - cidr: "10.0.10.39/32"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: "10.0.10.95/32"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
       toPorts:
         - ports:
             - port: "443"
