@@ -6,6 +6,8 @@ spec:
   match:
     excludedNamespaces:
       - falco
+      - observability
+      - kube-system
     kinds:
       - apiGroups: [""]
         kinds: ["Pod"]

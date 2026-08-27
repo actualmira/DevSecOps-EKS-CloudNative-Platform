@@ -29,6 +29,7 @@ dependency "security" {
     loki_s3_bucket_arn             = "arn:aws:s3:::mock-loki-bucket"
     loki_kms_key_id                = "mock-kms-key-id"
     alertmanager_sns_topic_arn     = "arn:aws:sns:eu-west-1:mock:alertmanager-alerts"
+    ssm_session_logs_bucket_id     = "ssm-logs-bucket"
   }
   mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
 }
@@ -46,4 +47,5 @@ inputs = {
   loki_s3_bucket_arn              = dependency.security.outputs.loki_s3_bucket_arn
   loki_kms_key_id                 = dependency.security.outputs.loki_kms_key_id
   alertmanager_sns_topic_arn      = dependency.security.outputs.alertmanager_sns_topic_arn
+  ssm_session_logs_bucket_id      = dependency.security.outputs.ssm_session_logs_bucket_id
 }

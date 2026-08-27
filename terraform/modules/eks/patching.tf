@@ -1,21 +1,17 @@
 resource "aws_ssm_patch_baseline" "eks_nodes" {
   name             = "${var.project}-${var.environment}-eks-patch-baseline"
   operating_system = "AMAZON_LINUX_2023"
-
   approval_rule {
     approve_after_days = 0
-
     patch_filter {
       key    = "CLASSIFICATION"
       values = ["Security", "Bugfix"]
     }
-
     patch_filter {
       key    = "SEVERITY"
       values = ["Critical", "Important"]
     }
   }
-
   tags = {
     Name        = "${var.project}-${var.environment}-eks-patch-baseline"
     Environment = var.environment
@@ -33,7 +29,6 @@ resource "aws_ssm_maintenance_window" "eks_patching" {
   schedule = "cron(0 2 ? * SUN *)"
   duration = 3
   cutoff   = 1
-
   tags = {
     Name        = "${var.project}-${var.environment}-eks-patch-window"
     Environment = var.environment
@@ -44,7 +39,6 @@ resource "aws_ssm_maintenance_window" "eks_patching" {
 resource "aws_ssm_maintenance_window_target" "eks_nodes" {
   window_id     = aws_ssm_maintenance_window.eks_patching.id
   resource_type = "INSTANCE"
-
   targets {
     key    = "tag:Patch Group"
     values = [aws_ssm_patch_group.eks_nodes.patch_group]
@@ -53,7 +47,6 @@ resource "aws_ssm_maintenance_window_target" "eks_nodes" {
 
 resource "aws_iam_role" "ssm_maintenance" {
   name = "${var.project}-${var.environment}-ssm-maintenance-role"
-
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -71,7 +64,6 @@ resource "aws_iam_role" "ssm_maintenance" {
       }
     ]
   })
-
   tags = {
     Name        = "${var.project}-${var.environment}-ssm-maintenance-role"
     Environment = var.environment
@@ -104,6 +96,10 @@ resource "aws_ssm_maintenance_window_task" "eks_patch_scan" {
         name   = "Operation"
         values = ["Scan"]
       }
+
+      output_s3_bucket     = var.ssm_session_logs_bucket_id
+      output_s3_key_prefix = "maintenance-window-scans/"
+
     }
   }
 }

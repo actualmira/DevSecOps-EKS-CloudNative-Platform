@@ -1,7 +1,6 @@
 resource "aws_s3_bucket" "ssm_session_logs" {
   bucket              = "${var.project}-${var.environment}-ssm-session-logs"
   object_lock_enabled = true
-
   tags = {
     Name        = "${var.project}-${var.environment}-ssm-session-logs"
     Environment = var.environment
@@ -36,7 +35,6 @@ resource "aws_s3_bucket_public_access_block" "ssm_session_logs" {
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "ssm_session_logs" {
   bucket = aws_s3_bucket.ssm_session_logs.id
-
   rule {
     apply_server_side_encryption_by_default {
       sse_algorithm     = "aws:kms"
@@ -50,15 +48,21 @@ resource "aws_s3_bucket_lifecycle_configuration" "ssm_session_logs" {
   bucket = aws_s3_bucket.ssm_session_logs.id
 
   rule {
-    id     = "cleanup-expired-session-logs"
+    id     = "expire-session-logs"
     status = "Enabled"
-
     expiration {
       days = 90
     }
-
     noncurrent_version_expiration {
       noncurrent_days = 90
+    }
+  }
+
+  rule {
+    id     = "cleanup-delete-markers"
+    status = "Enabled"
+    expiration {
+      expired_object_delete_marker = true
     }
   }
 }
@@ -67,7 +71,6 @@ resource "aws_cloudwatch_log_group" "ssm_session_logs" {
   name              = "/${var.project}/${var.environment}/ssm-session-logs"
   retention_in_days = 30
   kms_key_id        = aws_kms_key.ssm_session_logs.arn
-
   tags = {
     Name        = "${var.project}-${var.environment}-ssm-session-logs"
     Environment = var.environment
@@ -105,7 +108,8 @@ data "aws_iam_policy_document" "ssm_session_logging" {
       "logs:DescribeLogGroups",
       "logs:DescribeLogStreams"
     ]
-    resources = ["${aws_cloudwatch_log_group.ssm_session_logs.arn}:*"]
+    
+    resources = [aws_cloudwatch_log_group.ssm_session_logs.arn]
   }
 
   statement {
@@ -122,9 +126,53 @@ data "aws_iam_policy_document" "ssm_session_logging" {
 resource "aws_iam_policy" "ssm_session_logging" {
   name   = "${var.project}-${var.environment}-ssm-session-logging-policy"
   policy = data.aws_iam_policy_document.ssm_session_logging.json
-
   tags = {
     Name        = "${var.project}-${var.environment}-ssm-session-logging-policy"
+    Environment = var.environment
+    Project     = var.project
+  }
+}
+
+# Admin IAM policy enforcing session and run command restrictions
+data "aws_iam_policy_document" "admin_ssm_restrictions" {
+  statement {
+    sid    = "AllowInteractiveSessionToTaggedInstances"
+    effect = "Allow"
+    actions = [
+      "ssm:StartSession"
+    ]
+    resources = ["arn:aws:ec2:*:*:instance/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [var.environment]
+    }
+  }
+
+  statement {
+    sid    = "RestrictRunCommandToApprovedDocuments"
+    effect = "Allow"
+    actions = [
+      "ssm:SendCommand"
+    ]
+    resources = [
+      "arn:aws:ssm:*:*:document/AWS-RunPatchBaseline",
+      "arn:aws:ssm:*:*:document/AWS-RunShellScript",
+      "arn:aws:ec2:*:*:instance/*"
+    ]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [var.environment]
+    }
+  }
+}
+
+resource "aws_iam_policy" "admin_ssm_restrictions" {
+  name   = "${var.project}-${var.environment}-admin-ssm-policy"
+  policy = data.aws_iam_policy_document.admin_ssm_restrictions.json
+  tags = {
+    Name        = "${var.project}-${var.environment}-admin-ssm-policy"
     Environment = var.environment
     Project     = var.project
   }
@@ -134,7 +182,6 @@ resource "aws_ssm_document" "session_manager_preferences" {
   name            = "SSM-SessionManagerRunShell"
   document_type   = "Session"
   document_format = "JSON"
-
   content = jsonencode({
     schemaVersion = "1.0"
     description   = "Session Manager logs to S3 and CloudWatch"
@@ -157,7 +204,6 @@ resource "aws_ssm_document" "session_manager_preferences" {
       }
     }
   })
-
   tags = {
     Name        = "${var.project}-${var.environment}-ssm-session-preferences"
     Environment = var.environment
