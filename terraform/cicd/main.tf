@@ -30,7 +30,6 @@ provider "github" {
 data "aws_caller_identity" "current" {}
 
 #Locals
-
 locals {
   workflows = {
     eks = {
@@ -46,7 +45,6 @@ locals {
 }
 
 #OIDC Provider
-
 resource "aws_iam_openid_connect_provider" "github" {
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
@@ -60,7 +58,6 @@ resource "aws_iam_openid_connect_provider" "github" {
 }
 
 #Terraform State Access Policy
-
 resource "aws_iam_policy" "terraform_state_access" {
   name        = "${var.project}-${var.environment}-tf-state-access"
   description = "Read/write Terraform state (S3), locks (DynamoDB), state KMS key"
@@ -95,7 +92,6 @@ resource "aws_iam_policy" "terraform_state_access" {
 
 #Plan Roles
 # Any ref, locked to specific workflow file
-
 resource "aws_iam_role" "plan" {
   for_each = local.workflows
 
@@ -147,7 +143,6 @@ resource "aws_iam_role_policy_attachment" "plan_state" {
 
 # Apply Roles
 # Main branch only, locked to specific workflow file
-
 resource "aws_iam_role" "apply" {
   for_each = local.workflows
 
@@ -183,6 +178,7 @@ resource "aws_iam_role" "apply" {
   }
 }
 
+# I will streamline the broad administrator access after running IAM Access Analyzer
 resource "aws_iam_role_policy_attachment" "apply_admin" {
   for_each = local.workflows
 
@@ -198,7 +194,6 @@ resource "aws_iam_role_policy_attachment" "apply_state" {
 }
 
 #GitHub Actions Secrets
-
 resource "github_actions_secret" "plan_role_arn" {
   for_each = local.workflows
 
@@ -216,7 +211,6 @@ resource "github_actions_secret" "apply_role_arn" {
 }
 
 #Outputs
-
 output "plan_role_arns" {
   value = { for k, v in aws_iam_role.plan : k => v.arn }
 }
