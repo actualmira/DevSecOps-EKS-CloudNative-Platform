@@ -34,7 +34,7 @@ Defense-in-depth security for cloud-native applications on AWS EKS covering thre
 - [Threat Modelling](#threat-modelling)
 - [Kubernetes Security Controls](#kubernetes-security-controls)
 - [Policy as Code](#policy-as-code)
-- [Secrets Management with TLS](#secrets-management-with-tls)
+- [Secrets Management and TLS](#secrets-management-and-tls)
 - [Runtime Security with Falco](#runtime-security-with-falco)
 - [AWS Foundation and Network Security](#aws-foundation-and-network-security)
 - [Patch Management, SSM Session Logging, and ECR Hardening](#patch-management-ssm-session-logging-and-ecr-hardening)
@@ -360,7 +360,7 @@ targets:
 
 ---
 
-## Secrets Management with TLS
+## Secrets Management and TLS
 
 - I configured [Vault](k8s/vault/vault-values.yaml) with [ESO](k8s/eso/eso-values.yaml) for secrets management. This prevents hardcoding of secrets in config files, manifests or any source codes. Vault stores secrets encrypted at rest with a full audit log of every read, write, and authentication event. It follows the principle of least privilege because acess is controlled by policies that restrict exactly which paths a client can read.
 
@@ -632,7 +632,7 @@ targets:
 - At the CI/CD stage, I will configure EventBridge rule which will be triggered by the SSM patch compliance findings to invoke a lambda weebhook forwarder to the CI/CD pipeline. This way, EKS can safely perform the draining, cordoning, and replacing nodes sequentially.
 
 
-**[SSM Session Manager(]terraform/modules/security/ssm_logging.tf)**
+**[SSM Session Manager](terraform/modules/security/ssm_logging.tf)**
   
 - I configured SSM Session Manager as the only administrative access path to nodes. To enforce strict access controls, I implemented IAM policies targeting both interactive sessions and remote scripts: connections are restricted to instances tagged with the correct environment value, and remote executions are strictly limited to two approved SSM Run Command documents (AWS-RunPatchBaseline and AWS-RunShellScript). For a production enviironment, I would also enforce a conditional deny statement to block sessions where MFA is false.
 
@@ -656,7 +656,7 @@ targets:
   
 - I configured [cloudtrail](terraform/modules/security/cloudtrail.tf) logging to a dedicated s3 bucket with a customer managed KMS key to provide an audit trail of every API call made. The KMS key grants decrypt permission only to the account root, an attacker who compromises S3 cannot be able to read the logs without also compromising the key. 
 
-- I enabled object lock on GOVERNANCE mode to prevent the log files from being deleted during the retention period. I chose GOVERNANCE over COMPLIANCE, and a 30 days retention period because this is an active development environment and COMPLIANCE mode would make it impossible to destroy since even root cannot override it. In production, I would use COMPLIANCE mode and a longer retention period (as well as Glacier for archiving to cut storage cost significantly) to prevent anyone including root to delete or modify a log file during the retention period. This will prevent an attacker from covering up or deleting their trails.
+- I enabled object lock to prevent the log files from being deleted during the retention period. I chose GOVERNANCE over COMPLIANCE mode, and a 30 days retention period because this is an active development environment and COMPLIANCE mode would make it impossible to destroy since even root cannot override it. In production, I would use COMPLIANCE mode and a longer retention period (as well as Glacier for archiving to cut storage cost significantly) to prevent anyone including root to delete or modify a log file during the retention period. This will prevent an attacker from covering up or deleting their trails.
    
 - Because WORM doesn’t protect from tampering while on transit, I also enabled log file validation to create a cryptographic hash of every file which detects if the file was modified before reaching the bucket. 
 
