@@ -380,7 +380,7 @@ targets:
 
 - In a production environment where static credentials can introduce critical risks like credential theft, insider threat, and long exposure windows, I would enable the Vault Database Secrets Engine and configure Vault to take ownership of the database root password. With this, Vault can generate a complex random password, store it internally, and overwrite the original used in init phase. This will eliminate any engineer or admin knowledge of the root password. It can only be accessed when necessary through Vault's API by an authenticated identity with explicit policy permission and access captured in audit logging.
 
-- I would also enable dynamic generation of short-lived database user credentials on request using Vault's dynamic roles. When the mariadb pod starts, ESO will request credentials from Vault, Vault will then connect to MariaDB and create a temporary user with time-to-live. This will eliminate re-using of credentials and limit the attack window from a stolen token.
+- I would also enable dynamic generation of short-lived database user credentials on request using Vault's dynamic roles. When ESO syncs the ExternalSecret, it requests credentials from Vault, Vault connects to MariaDB and creates a temporary user with time-to-live, ESO will then write the credentials into a Kubernetes Secret so that MariaDB can consume. This will eliminate re-using of credentials and limit the attack window from a stolen token.
 
 **Network policy for ESO and Vault**
 
@@ -707,9 +707,9 @@ targets:
 
 - I configured the instance credential exfiltration remediation to send sns alert instead of revoking the node role. This is because this is a dev environment and there’s no high availability. Revoking the node role will cause every pod on that node to lose access to AWS, causing denial of service. In a production environment with high availability, I should configure it to revoke the node role.
 
-- Similarly, I configured the GuardDuty findings that indicate node compromise such as Execution:Runtime/ReverseShell, Execution:Runtime/MaliciousFile, and CryptoCurrency:Runtime/BitcoinToolto to send sns alert instead of isolating the node. In a production environment, with high availability, these alerts would require isolating the node automatically.
+- Similarly, I configured the GuardDuty findings that indicate node compromise such as "Trojan:EC2/DNSDataExfiltration", "Trojan:EC2/DGADomainRequest.B", "Impact:EC2/BitcoinDomainRequest.Reputation", and "Impact:EC2/MaliciousDomainRequest.Reputation" to send sns alert instead of isolating the node. In a production environment, with high availability, these alerts would require isolating the node automatically.
 
-- I configured the compromised credential finding (UnauthorizedAccess:IAMUser/*) to be auto-remediated by applying a deny policy to the IAM role or deactivating the access key. This is because for that threat to be flagged, AWS's threat intelligence has already made the determination with high confidence. Requiring human review before remediating widens the window between detection and containment, and this leaves the credentials active giving the attacker time to create new credentials, escalate privileges, or exfiltrate data. The [lambda function](lambda/revoke_iam_session/handler.py) denies the specific session or deactivates the specific key, so the blast radius is contained.
+- I configured the compromised credential finding to be auto-remediated by applying a deny policy to the IAM role or deactivating the access key. This is because for that threat to be flagged, AWS's threat intelligence has already made the determination with high confidence. Requiring human review before remediating widens the window between detection and containment, and this leaves the credentials active giving the attacker time to create new credentials, escalate privileges, or exfiltrate data. The [lambda function](lambda/revoke_iam_session/handler.py) denies the specific session or deactivates the specific key, so the blast radius is contained.
 
 ---
 
