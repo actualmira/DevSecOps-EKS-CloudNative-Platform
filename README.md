@@ -36,11 +36,11 @@ Defense-in-depth security for cloud-native applications on AWS EKS covering thre
 - [Policy as Code](#policy-as-code)
 - [Secrets Management with TLS](#secrets-management-with-tls)
 - [Runtime Security with Falco](#runtime-security-with-falco)
-- [AWS Foundation and Network Security](aws-foundation-and-network-security)
-- [Patch Management, SSM Session Logging, and ECR Hardening](patch-management-ssm-session-logging-and-ecr-hardening)
+- [AWS Foundation and Network Security](#aws-foundation-and-network-security)
+- [Patch Management, SSM Session Logging, and ECR Hardening](#patch-management-ssm-session-logging-and-ecr-hardening)
 - [AWS Logging, Monitoring, and Detection](#aws-logging-monitoring-and-detection)
 - [EventBridge and Lambda Automated Remediation](#eventbridge-and-lambda-automated-remediation)
-- [Observability and Monitoring](#observability-and-monitorin)
+- [Observability and Monitoring](#observability-and-monitoring)
 - [Branch Protection, AWS OIDC, and Workflow IAM Roles](#branch-protection-aws-oidc-and-workflow-iam-roles)
 
 ---
