@@ -48,4 +48,7 @@ inputs = {
   loki_kms_key_id                 = dependency.security.outputs.loki_kms_key_id
   alertmanager_sns_topic_arn      = dependency.security.outputs.alertmanager_sns_topic_arn
   ssm_session_logs_bucket_id      = dependency.security.outputs.ssm_session_logs_bucket_id
+  github_org                      = "actualmira"
+  github_repo                     = "DevSecOps-EKS-CloudNative-Platform"
+  aws_region                      = "eu-west-1"
 }
