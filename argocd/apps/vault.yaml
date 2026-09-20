@@ -21,7 +21,7 @@ spec:
           - $values/k8s/vault/vault-values.yaml
         parameters:
           - name: "server.serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
-            value: "arn:aws:iam::011555818509:role/devsecops-dev-vault-role"
+            value: "arn:aws:iam::853184314323:role/devsecops-dev-vault-role"
     - repoURL: https://github.com/actualmira/DevSecOps-EKS-CloudNative-Platform.git
       targetRevision: main
       ref: values

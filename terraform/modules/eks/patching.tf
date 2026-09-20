@@ -1,3 +1,4 @@
+# Patch Baseline
 resource "aws_ssm_patch_baseline" "eks_nodes" {
   name             = "${var.project}-${var.environment}-eks-patch-baseline"
   operating_system = "AMAZON_LINUX_2023"
@@ -19,11 +20,13 @@ resource "aws_ssm_patch_baseline" "eks_nodes" {
   }
 }
 
+# Patch Group
 resource "aws_ssm_patch_group" "eks_nodes" {
   baseline_id = aws_ssm_patch_baseline.eks_nodes.id
   patch_group = "${var.project}-${var.environment}-eks-nodes"
 }
 
+# Maintenance Window
 resource "aws_ssm_maintenance_window" "eks_patching" {
   name     = "${var.project}-${var.environment}-eks-patch-window"
   schedule = "cron(0 2 ? * SUN *)"
@@ -102,4 +105,32 @@ resource "aws_ssm_maintenance_window_task" "eks_patch_scan" {
 
     }
   }
+}
+
+# EventBridge rule
+resource "aws_cloudwatch_event_rule" "ssm_patch_noncompliant" {
+  name        = "${var.project}-${var.environment}-ssm-patch-noncompliant"
+  description = "Triggers CI/CD rolling update when EKS nodes are non-compliant with patch baseline"
+
+  event_pattern = jsonencode({
+    source      = ["aws.ssm"]
+    detail-type = ["Configuration Compliance State Change"]
+    detail = {
+      compliance-status = ["non_compliant"]
+      resource-type     = ["managed-instance"]
+      compliance-type   = ["Patch"]
+    }
+  })
+
+  tags = {
+    Name        = "${var.project}-${var.environment}-ssm-patch-noncompliant"
+    Environment = var.environment
+    Project     = var.project
+  }
+}
+
+resource "aws_cloudwatch_event_target" "patch_webhook" {
+  rule      = aws_cloudwatch_event_rule.ssm_patch_noncompliant.name
+  target_id = "SendToPatchWebhookLambda"
+  arn       = aws_lambda_function.patch_webhook.arn
 }

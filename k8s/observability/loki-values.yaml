@@ -45,7 +45,7 @@ serviceAccount:
   create: true
   name: loki
   annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::011555818509:role/devsecops-dev-loki-role
+    eks.amazonaws.com/role-arn: arn:aws:iam::853184314323:role/devsecops-dev-loki-role
 
 write:
   replicas: 1

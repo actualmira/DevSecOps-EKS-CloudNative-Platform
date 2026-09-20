@@ -42,3 +42,4 @@ cosign.key
 .terragrunt-cache/
 lambda/zips/
 **/*.zip
+*.swp
