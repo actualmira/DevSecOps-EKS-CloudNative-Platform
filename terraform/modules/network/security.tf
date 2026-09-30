@@ -14,7 +14,7 @@ resource "aws_security_group" "alb" {
 # app node security group
 resource "aws_security_group" "apps" {
   name        = "${var.project}-${var.environment}-apps-sg"
-  description = "Security group for application nodes running DVWA, ESO, Observability, Falco"
+  description = "Security group for application node running DVWA"
   vpc_id      = aws_vpc.devsecops.id
 
   tags = {

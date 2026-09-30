@@ -1,3 +1,4 @@
+# loki s3 
 resource "aws_s3_bucket" "loki" {
   bucket = "${var.project}-${var.environment}-loki-logs"
 

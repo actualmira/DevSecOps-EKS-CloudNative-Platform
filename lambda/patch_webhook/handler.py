@@ -8,7 +8,7 @@ import os
 def lambda_handler(event, context):
     """
     Triggered by EventBridge when SSM patch compliance
-    finds NON COMPLIANT EKS nodes.
+    finds NON COMPLIANT nodes.
 
     """
     detail = event.get("detail", {})
