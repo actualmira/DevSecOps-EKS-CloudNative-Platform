@@ -1,6 +1,7 @@
 name: Kubernetes Manifest Pipeline
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
     paths:
@@ -59,7 +60,7 @@ jobs:
           helm template cert-manager jetstack/cert-manager \
             --namespace cert-manager -f k8s/cert-manager/cert-manager-values.yaml > rendered-manifests/cert-manager-rendered.yaml
           helm template trust-manager jetstack/trust-manager \
-            --namespace cert-manager -f k8s/cert-manager/trust-manager-values.yaml > rendered-manifests/trust-manager-rendered.yaml
+            --namespace cert-manager -f k8s/trust-manager/trust-manager-values.yaml > rendered-manifests/trust-manager-rendered.yaml
           helm template vault hashicorp/vault \
             --namespace vault -f k8s/vault/vault-values.yaml > rendered-manifests/vault-rendered.yaml
 

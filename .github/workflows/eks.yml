@@ -1,6 +1,7 @@
 name: EKS Pipeline
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
     paths:
