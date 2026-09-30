@@ -1,12 +1,15 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: cert-manager
-  annotations:
-    argocd.argoproj.io/sync-wave: "-1"
+  name: dvwa
   labels:
-    kubernetes.io/metadata.name: cert-manager
-    name: cert-manager
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: v1.35
-
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dvwa-sva
+  namespace: dvwa

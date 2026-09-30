@@ -1,0 +1,46 @@
+name: Node Rolling Update Pipeline
+
+on:
+  repository_dispatch:
+    types: [ssm-patch-noncompliant]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-west-1
+  ROLE_ARN: ${{ secrets.AWS_ROLE_ARN_PATCHING_APPLY }}
+  CLUSTER_NAME: devsecops-dev-cluster
+
+jobs:
+  rolling-update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Log dispatch event
+        run: |
+          echo "Instance ID: ${{ github.event.client_payload.instance_id }}"
+          echo "Compliance Status: ${{ github.event.client_payload.compliance_status }}"
+          echo "Severity: ${{ github.event.client_payload.severity }}"
+
+      - name: AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Find non-compliant nodegroup
+        id: find-nodegroup
+        run: |
+          INSTANCE_ID="${{ github.event.client_payload.instance_id }}"
+          NODEGROUP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query 'Reservations[0].Instances[0].Tags[?Key==`eks:nodegroup-name`].Value' --output text)
+          echo "nodegroup=$NODEGROUP" >> $GITHUB_OUTPUT
+
+      - name: Trigger EKS Node Rolling Update
+        run: |
+          aws eks update-nodegroup-version --cluster-name ${{ env.CLUSTER_NAME }} --nodegroup-name ${{ steps.find-nodegroup.outputs.nodegroup }} --region ${{ env.AWS_REGION }}
+
+

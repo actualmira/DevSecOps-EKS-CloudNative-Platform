@@ -1,0 +1,100 @@
+name: Kubernetes Manifest Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'k8s/**'
+      - 'argocd/**'
+  push:
+    branches: [main]
+    paths:
+      - 'k8s/**'
+      - 'argocd/**'
+
+permissions:
+  contents: read
+
+jobs:
+  manifest-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install kubeconform
+        run: |
+          KUBECONFORM_VERSION="v0.8.0"
+          EXPECTED_SHA="9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
+          curl -sL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" -o kc.tar.gz
+          echo "${EXPECTED_SHA}  kc.tar.gz" | sha256sum -c -
+          tar xzf kc.tar.gz
+          mkdir -p "$HOME/.local/bin" && mv kubeconform "$HOME/.local/bin/"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install Gator
+        run: |
+          GATOR_VERSION="v3.23.1"
+          EXPECTED_SHA="c268d7b809c9fe59a110ab0bf7c296ab00b0b6c894c209cd15e94194590291bb"
+          curl -sL "https://github.com/open-policy-agent/gatekeeper/releases/download/${GATOR_VERSION}/gator-${GATOR_VERSION}-linux-amd64.tar.gz" -o gator.tar.gz
+          echo "${EXPECTED_SHA}  gator.tar.gz" | sha256sum -c -
+          tar xzf gator.tar.gz
+          mkdir -p "$HOME/.local/bin" && mv gator "$HOME/.local/bin/"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Add Helm repos
+        run: |
+          helm repo add external-secrets https://charts.external-secrets.io
+          helm repo add falcosecurity https://falcosecurity.github.io/charts
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo add hashicorp https://helm.releases.hashicorp.com
+          helm repo update
+
+      - name: Render Helm charts
+        run: |
+          mkdir -p rendered-manifests/
+          helm template external-secrets external-secrets/external-secrets \
+            --namespace eso -f k8s/eso/eso-values.yaml > rendered-manifests/eso-rendered.yaml
+          helm template falco falcosecurity/falco \
+            --namespace falco -f k8s/falco/falco-eks-values.yaml > rendered-manifests/falco-rendered.yaml
+          helm template cert-manager jetstack/cert-manager \
+            --namespace cert-manager -f k8s/cert-manager/cert-manager-values.yaml > rendered-manifests/cert-manager-rendered.yaml
+          helm template trust-manager jetstack/trust-manager \
+            --namespace cert-manager -f k8s/cert-manager/trust-manager-values.yaml > rendered-manifests/trust-manager-rendered.yaml
+          helm template vault hashicorp/vault \
+            --namespace vault -f k8s/vault/vault-values.yaml > rendered-manifests/vault-rendered.yaml
+
+      - name: kubeconform
+        run: |
+          CATALOG='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          find k8s/ argocd/ /tmp/rendered-manifests/ -type f \( -name '*.yaml' -o -name '*.yml' \) \
+            -not -name '*-values.yaml' \
+            -print0 | xargs -0 kubeconform \
+              -schema-location default \
+              -schema-location "$CATALOG" \
+              -ignore-missing-schemas \
+              -kubernetes-version 1.35.0 \
+              -summary
+
+      - name: Trivy config scan
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: config
+          scan-ref: .
+          skip-dirs: 'terraform,.github,.git'
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+      - name: Gator test
+        run: |
+          gator test \
+            --filename=k8s/opa_gatekeeper/01-templates/enforce_network_policy.yaml \
+            --filename=k8s/opa_gatekeeper/01-templates/enforce_rbac_service_account.yaml \
+            --filename=k8s/opa_gatekeeper/02-constraints/network_policy_constraint.yaml \
+            --filename=k8s/opa_gatekeeper/02-constraints/rbac_service_account_constraint.yaml \
+            --filename=k8s/dvwa/ \
+            --filename=k8s/database/ \
+            --filename=k8s/vault/ \
+            --filename=k8s/cert-manager/ \
+            --filename=k8s/falco/ \
+            --filename=k8s/eso/ \
+            --filename=/tmp/rendered-manifests/

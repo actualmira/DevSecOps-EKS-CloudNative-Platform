@@ -12,7 +12,7 @@ remote_state {
     if_exists = "overwrite"
   }
   config = {
-    bucket         = "devsecops-eks-05-26"
+    bucket         = "devsecops-eks-08-26"
     key            = "environments/dev/${path_relative_to_include()}/terraform.tfstate"
     region         = "eu-west-1"
     dynamodb_table = "terraform-state-lock"

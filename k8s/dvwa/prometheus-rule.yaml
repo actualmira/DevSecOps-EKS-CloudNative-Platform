@@ -3,6 +3,8 @@ kind: PrometheusRule
 metadata:
   name: dvwa-alerts
   namespace: dvwa
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
   labels:
     release: kube-prometheus-stack
 spec:
