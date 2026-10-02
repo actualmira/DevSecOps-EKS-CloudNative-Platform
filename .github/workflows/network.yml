@@ -54,6 +54,7 @@ jobs:
           aws-role-to-assume: ${{ env.ROLE_ARN }}
 
       - name: fmt check
+        working-directory: ${{ github.workspace }}
         run: terraform fmt -check -recursive terraform/modules/network
 
       - run: terragrunt init

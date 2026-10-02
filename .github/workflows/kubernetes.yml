@@ -107,4 +107,8 @@ jobs:
             --filename=k8s/opa_gatekeeper/02-constraints/rbac_service_account_constraint.yaml \
             --filename=k8s/dvwa/ \
             --filename=k8s/database/ \
+            --filename=k8s/vault/ \
+            --filename=k8s/cert-manager/ \
+            --filename=k8s/falco/ \
+            --filename=k8s/eso/ \
             --filename=rendered-manifests/
