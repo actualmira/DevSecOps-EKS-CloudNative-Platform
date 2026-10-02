@@ -19,12 +19,13 @@ spec:
         role: apps
       automountServiceAccountToken: false
       serviceAccountName: dvwa-sva
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 998
       containers:
         - name: dvwa
           image: ghcr.io/digininja/dvwa:33e364c
           securityContext:
-            runAsNonRoot: true
-            runAsUser: 998
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             seccompProfile:

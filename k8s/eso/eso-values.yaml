@@ -6,7 +6,7 @@ serviceAccount:
   create: true
   name: eso-sa
 
-securityContext:
+podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
   seccompProfile:
@@ -39,7 +39,7 @@ webhook:
       cpu: "100m"
       memory: "128Mi"
 
-  securityContext:
+  podSecurityContext:
     runAsNonRoot: true
     runAsUser: 1000
     seccompProfile:
@@ -60,7 +60,7 @@ certController:
     limits:
       cpu: "100m"
       memory: "128Mi"
-  securityContext:
+  podSecurityContext:
     runAsNonRoot: true
     runAsUser: 1000
     seccompProfile:

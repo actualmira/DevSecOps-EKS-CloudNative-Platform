@@ -56,7 +56,7 @@ jobs:
           aws-role-to-assume: ${{ env.ROLE_ARN }}
 
       - name: fmt check
-        run: terraform fmt -check terraform/modules/security
+        run: terraform fmt -check -recursive terraform/modules/security
 
       - run: terragrunt init
       - run: terragrunt validate

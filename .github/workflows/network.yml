@@ -54,7 +54,7 @@ jobs:
           aws-role-to-assume: ${{ env.ROLE_ARN }}
 
       - name: fmt check
-        run: terraform fmt -check terraform/modules/network
+        run: terraform fmt -check -recursive terraform/modules/network
 
       - run: terragrunt init
       - run: terragrunt validate
