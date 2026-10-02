@@ -107,7 +107,7 @@ resource "aws_cloudtrail" "cloudtrail" {
   is_multi_region_trail         = true
   enable_log_file_validation    = true
   kms_key_id                    = aws_kms_key.cloudtrail.arn
-  
+
   tags = {
     Name        = "${var.project}-${var.environment}-cloudtrail"
     Environment = var.environment

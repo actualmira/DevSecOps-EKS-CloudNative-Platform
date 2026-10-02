@@ -107,8 +107,13 @@ jobs:
             --filename=k8s/opa_gatekeeper/02-constraints/rbac_service_account_constraint.yaml \
             --filename=k8s/dvwa/ \
             --filename=k8s/database/ \
-            --filename=k8s/vault/ \
-            --filename=k8s/cert-manager/ \
-            --filename=k8s/falco/ \
-            --filename=k8s/eso/ \
+            --filename=k8s/vault/network-policy.yaml \
+            --filename=k8s/vault/namespace.yaml \
+            --filename=k8s/cert-manager/network-policy.yaml \
+            --filename=k8s/cert-manager/namespace.yaml \
+            --filename=k8s/falco/falco-network-policy.yaml \
+            --filename=k8s/falco/namespace.yaml \
+            --filename=k8s/eso/network-policy.yaml \
+            --filename=k8s/eso/namespace.yaml \
             --filename=rendered-manifests/
+
