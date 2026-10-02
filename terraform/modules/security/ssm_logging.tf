@@ -108,7 +108,7 @@ data "aws_iam_policy_document" "ssm_session_logging" {
       "logs:DescribeLogGroups",
       "logs:DescribeLogStreams"
     ]
-    
+
     resources = [aws_cloudwatch_log_group.ssm_session_logs.arn]
   }
 

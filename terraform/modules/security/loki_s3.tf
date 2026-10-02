@@ -1,3 +1,4 @@
+# loki s3 
 resource "aws_s3_bucket" "loki" {
   bucket = "${var.project}-${var.environment}-loki-logs"
 
@@ -24,7 +25,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "loki" {
       kms_master_key_id = aws_kms_key.loki.arn
     }
     bucket_key_enabled = true
-  }  
+  }
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "loki" {

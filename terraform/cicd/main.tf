@@ -10,7 +10,7 @@ terraform {
     }
   }
   backend "s3" {
-    bucket         = "devsecops-eks-05-26"
+    bucket         = "devsecops-eks-08-26"
     key            = "cicd/terraform.tfstate"
     region         = "eu-west-1"
     dynamodb_table = "terraform-state-lock"
@@ -70,8 +70,8 @@ resource "aws_iam_policy" "terraform_state_access" {
         Effect = "Allow"
         Action = ["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:DeleteObject"]
         Resource = [
-          "arn:aws:s3:::devsecops-eks-05-26",
-          "arn:aws:s3:::devsecops-eks-05-26/*"
+          "arn:aws:s3:::devsecops-eks-08-26",
+          "arn:aws:s3:::devsecops-eks-08-26/environments/dev/*"
         ]
       },
       {
@@ -199,7 +199,7 @@ resource "github_actions_secret" "plan_role_arn" {
 
   repository      = var.github_repo
   secret_name     = "AWS_ROLE_ARN_${upper(each.key)}_PLAN"
-  plaintext_value = aws_iam_role.plan[each.key].arn
+  value = aws_iam_role.plan[each.key].arn
 }
 
 resource "github_actions_secret" "apply_role_arn" {
@@ -207,7 +207,7 @@ resource "github_actions_secret" "apply_role_arn" {
 
   repository      = var.github_repo
   secret_name     = "AWS_ROLE_ARN_${upper(each.key)}_APPLY"
-  plaintext_value = aws_iam_role.apply[each.key].arn
+  value = aws_iam_role.apply[each.key].arn
 }
 
 #Outputs

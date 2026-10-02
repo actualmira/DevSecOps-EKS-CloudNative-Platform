@@ -19,7 +19,7 @@ data "aws_iam_policy_document" "lambda_assume_role" {
 
 # SNS TOPIC FOR PATCH WEBHOOK FAILURES
 resource "aws_sns_topic" "patch_remediation" {
-  name = "${var.project}-${var.environment}-patch-remediation"
+  name              = "${var.project}-${var.environment}-patch-remediation"
   kms_master_key_id = "alias/aws/sns"
 
   tags = {
@@ -94,9 +94,9 @@ data "aws_iam_policy_document" "patch_webhook_policy" {
   }
 
   statement {
-    sid     = "PublishToSNS"
-    effect  = "Allow"
-    actions = ["sns:Publish"]
+    sid       = "PublishToSNS"
+    effect    = "Allow"
+    actions   = ["sns:Publish"]
     resources = [aws_sns_topic.patch_remediation.arn]
   }
 }
@@ -125,10 +125,10 @@ resource "aws_lambda_function" "patch_webhook" {
 
   environment {
     variables = {
-      GITHUB_SECRET_ARN  = data.aws_secretsmanager_secret.github_pat.arn
-      GITHUB_ORG         = var.github_org
-      GITHUB_REPO        = var.github_repo
-      AWS_REGION_NAME    = var.aws_region
+      GITHUB_SECRET_ARN = data.aws_secretsmanager_secret.github_pat.arn
+      GITHUB_ORG        = var.github_org
+      GITHUB_REPO       = var.github_repo
+      AWS_REGION_NAME   = var.aws_region
     }
   }
 

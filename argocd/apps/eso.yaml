@@ -8,17 +8,17 @@ metadata:
 spec:
   project: default
   sources:
-    - repoURL: https://github.com/actualmira/DevSecOps-EKS-CloudNative-Platform.git
-      targetRevision: main
-      path: k8s/eso
-      directory:
-        include: "eso.yaml"
     - repoURL: https://charts.external-secrets.io
       chart: external-secrets
       targetRevision: "0.16.1"
       helm:
         valueFiles:
           - $values/k8s/eso/eso-values.yaml
+    - repoURL: https://github.com/actualmira/DevSecOps-EKS-CloudNative-Platform.git
+      targetRevision: main
+      path: k8s/eso
+      directory:
+        exclude: "*-values.yaml"
     - repoURL: https://github.com/actualmira/DevSecOps-EKS-CloudNative-Platform.git
       targetRevision: main
       ref: values

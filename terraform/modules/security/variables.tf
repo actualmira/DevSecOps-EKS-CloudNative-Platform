@@ -1,19 +1,19 @@
 variable "environment" {
-  type        = string
+  type = string
 }
 
 variable "project" {
-  type        = string
+  type = string
 }
 
 variable "aws_region" {
-  type        = string
-  default     = "eu-west-1"
+  type    = string
+  default = "eu-west-1"
 }
 
 variable "vpc_id" {
-  type        = string
+  type = string
 }
 variable "lambda_source_path" {
-  type        = string
+  type = string
 }

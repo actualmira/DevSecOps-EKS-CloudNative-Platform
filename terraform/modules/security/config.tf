@@ -15,7 +15,7 @@ resource "aws_config_configuration_recorder" "main" {
 resource "aws_config_delivery_channel" "main" {
   name           = "${var.project}-${var.environment}-config-delivery"
   s3_bucket_name = aws_s3_bucket.config.id
-  
+
   snapshot_delivery_properties {
     delivery_frequency = "TwentyFour_Hours"
   }
@@ -288,8 +288,8 @@ resource "aws_s3_account_public_access_block" "main" {
 }
 
 resource "aws_config_config_rule" "s3_account_public_block" {
-  name        = "${var.project}-${var.environment}-s3-account-public-block"
-  
+  name = "${var.project}-${var.environment}-s3-account-public-block"
+
   source {
     owner             = "AWS"
     source_identifier = "S3_ACCOUNT_LEVEL_PUBLIC_ACCESS_BLOCKS"
@@ -356,9 +356,9 @@ resource "aws_iam_role_policy" "config_s3_remediation" {
 }
 
 resource "aws_config_remediation_configuration" "s3_account_public_block" {
-  config_rule_name = aws_config_config_rule.s3_account_public_block.name
-  target_type      = "SSM_DOCUMENT"
-  target_id        = "AWSConfigRemediation-ConfigureS3PublicAccessBlock"
+  config_rule_name           = aws_config_config_rule.s3_account_public_block.name
+  target_type                = "SSM_DOCUMENT"
+  target_id                  = "AWSConfigRemediation-ConfigureS3PublicAccessBlock"
   automatic                  = true
   maximum_automatic_attempts = 5
   retry_attempt_seconds      = 60

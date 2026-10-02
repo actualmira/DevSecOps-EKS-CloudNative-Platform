@@ -3,6 +3,8 @@ kind: ServiceMonitor
 metadata:
   name: mariadb
   namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
   labels:
     release: kube-prometheus-stack
 spec:

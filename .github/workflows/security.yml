@@ -1,0 +1,86 @@
+name: Security Pipeline
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'terraform/env/dev/network/**'
+      - 'terraform/modules/network/**'
+      - 'terraform/env/dev/security/**'
+      - 'terraform/modules/security/**'
+  push:
+    branches: [main]
+    paths:
+      - 'terraform/env/dev/security/**'
+      - 'terraform/modules/security/**'
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  AWS_REGION: eu-west-1
+  ROLE_ARN: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && secrets.AWS_ROLE_ARN_SECURITY_APPLY || secrets.AWS_ROLE_ARN_SECURITY_PLAN }}
+
+jobs:
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: trufflesecurity/trufflehog@f714bf454f350590f4a24c3ddb1aef02c35bf5b6 # v3.97.5
+        with:
+          extra_args: --only-verified
+
+  terraform:
+    needs: secrets-scan
+    runs-on: ubuntu-latest
+    environment: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'production' || '' }}
+    defaults:
+      run:
+        working-directory: terraform/env/dev/security
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Terragrunt
+        uses: datadrivers/terragrunt-action@d999c649191a9c3cb22b5dce115c4d74204f53fa # v4.5.1
+        env:
+          TENV_GITHUB_TOKEN: ${{ github.token }}
+        with:
+          use-aws-auth: "true"
+          aws-region: ${{ env.AWS_REGION }}
+          aws-role-to-assume: ${{ env.ROLE_ARN }}
+          terraform-version: "1.14.5"
+          terragrunt-version: "1.1.3"
+
+      - name: fmt check
+        working-directory: ${{ github.workspace }}
+        run: terraform fmt -check -recursive terraform/modules/security || true
+
+      - run: terragrunt init
+      - run: terragrunt validate
+      - run: terragrunt plan -out=tfplan -input=false
+      - run: terragrunt show -json tfplan > tfplan.json
+
+      - name: Checkov IaC Scan
+        uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
+        with:
+          file: terraform/env/dev/security/tfplan.json
+          framework: terraform_plan
+          soft_fail: false
+
+      - name: Plan Comments
+        if: github.event_name == 'pull_request'
+        uses: borchero/terraform-plan-comment@9c18ac901b5d2b58e9cbd9d1480af36e28ffaf88 # v2
+        with:
+          token: ${{ github.token }}
+          planfile: terraform/env/dev/security/tfplan
+          terraform-cmd: terragrunt
+
+      - name: Terragrunt Apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: terragrunt apply -input=false tfplan

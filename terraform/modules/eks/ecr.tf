@@ -76,7 +76,7 @@ resource "aws_ecr_repository_policy" "dvwa" {
   policy     = data.aws_iam_policy_document.ecr_repository_policy.json
 }
 
-# PULL-THROUGH CACHE RULE
+# pull through cache rule
 data "aws_secretsmanager_secret" "dockerhub" {
   name = "ecr-pullthroughcache/${var.project}-${var.environment}-dockerhub"
 }
