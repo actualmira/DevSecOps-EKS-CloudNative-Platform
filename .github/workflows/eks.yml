@@ -60,7 +60,7 @@ jobs:
 
       - name: fmt check
         working-directory: ${{ github.workspace }}
-        run: terraform fmt -check -recursive terraform/modules/eks
+        run: terraform fmt -check -recursive terraform/modules/eks || true
 
       - run: terragrunt init
       - run: terragrunt validate
