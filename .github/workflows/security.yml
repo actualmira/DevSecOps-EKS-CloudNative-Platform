@@ -46,9 +46,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: fmt check
-        run: terraform fmt -check -recursive terraform/modules/security terraform/env/dev/security
-
       - name: Setup Terragrunt
         uses: datadrivers/terragrunt-action@d999c649191a9c3cb22b5dce115c4d74204f53fa # v4.5.1
         env:
@@ -57,6 +54,9 @@ jobs:
           use-aws-auth: "true"
           aws-region: ${{ env.AWS_REGION }}
           aws-role-to-assume: ${{ env.ROLE_ARN }}
+
+      - name: fmt check
+        run: terraform fmt -check terraform/modules/security
 
       - run: terragrunt init
       - run: terragrunt validate

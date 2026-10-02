@@ -42,6 +42,11 @@ jobs:
           mkdir -p "$HOME/.local/bin" && mv gator "$HOME/.local/bin/"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: 'v3.14.0'
+
       - name: Add Helm repos
         run: |
           helm repo add external-secrets https://charts.external-secrets.io
@@ -53,21 +58,21 @@ jobs:
       - name: Render Helm charts
         run: |
           mkdir -p rendered-manifests/
-          helm template external-secrets external-secrets/external-secrets \
+          helm template external-secrets external-secrets/external-secrets --version 0.16.1 \
             --namespace eso -f k8s/eso/eso-values.yaml > rendered-manifests/eso-rendered.yaml
-          helm template falco falcosecurity/falco \
+          helm template falco falcosecurity/falco --version 4.15.0 \
             --namespace falco -f k8s/falco/falco-eks-values.yaml > rendered-manifests/falco-rendered.yaml
-          helm template cert-manager jetstack/cert-manager \
+          helm template cert-manager jetstack/cert-manager --version v1.21.2 \
             --namespace cert-manager -f k8s/cert-manager/cert-manager-values.yaml > rendered-manifests/cert-manager-rendered.yaml
-          helm template trust-manager jetstack/trust-manager \
+          helm template trust-manager jetstack/trust-manager --version 0.25.0 \
             --namespace cert-manager -f k8s/trust-manager/trust-manager-values.yaml > rendered-manifests/trust-manager-rendered.yaml
-          helm template vault hashicorp/vault \
+          helm template vault hashicorp/vault --version 0.33.0 \
             --namespace vault -f k8s/vault/vault-values.yaml > rendered-manifests/vault-rendered.yaml
 
       - name: kubeconform
         run: |
           CATALOG='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
-          find k8s/ argocd/ /tmp/rendered-manifests/ -type f \( -name '*.yaml' -o -name '*.yml' \) \
+          find k8s/ argocd/ rendered-manifests/ -type f \( -name '*.yaml' -o -name '*.yml' \) \
             -not -name '*-values.yaml' \
             -print0 | xargs -0 kubeconform \
               -schema-location default \
@@ -94,8 +99,4 @@ jobs:
             --filename=k8s/opa_gatekeeper/02-constraints/rbac_service_account_constraint.yaml \
             --filename=k8s/dvwa/ \
             --filename=k8s/database/ \
-            --filename=k8s/vault/ \
-            --filename=k8s/cert-manager/ \
-            --filename=k8s/falco/ \
-            --filename=k8s/eso/ \
-            --filename=/tmp/rendered-manifests/
+            --filename=rendered-manifests/
