@@ -48,6 +48,7 @@ jobs:
         uses: datadrivers/terragrunt-action@d999c649191a9c3cb22b5dce115c4d74204f53fa # v4.5.1
         env:
           TENV_GITHUB_TOKEN: ${{ github.token }}
+          TENV_AUTO_INSTALL: "true"
         with:
           use-aws-auth: "true"
           aws-region: ${{ env.AWS_REGION }}
