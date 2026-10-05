@@ -13,7 +13,6 @@ dependency "network" {
     vpc_id = "vpc-id"
   }
   mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
-  mock_outputs_merge_strategy_with_state  = "shallow"
 }
 
 inputs = {

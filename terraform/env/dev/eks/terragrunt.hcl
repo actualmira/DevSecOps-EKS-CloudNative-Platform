@@ -19,7 +19,6 @@ dependency "network" {
   }
 
   mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
-  mock_outputs_merge_strategy_with_state  = "shallow"
 }
 
 dependency "security" {
@@ -33,7 +32,6 @@ dependency "security" {
     ssm_session_logs_bucket_id     = "ssm-logs-bucket"
   }
   mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
-  mock_outputs_merge_strategy_with_state  = "shallow"
 }
 
 inputs = {
