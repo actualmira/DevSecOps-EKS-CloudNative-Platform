@@ -18,7 +18,7 @@ dependency "network" {
     sts_vpc_endpoint_id              = "sts-endpoint-id"
   }
 
-  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "show", "destroy"]
 }
 
 dependency "security" {
@@ -31,7 +31,7 @@ dependency "security" {
     alertmanager_sns_topic_arn     = "arn:aws:sns:eu-west-1:123456789012:alertmanager-alerts"
     ssm_session_logs_bucket_id     = "ssm-logs-bucket"
   }
-  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "show", "destroy"]
 }
 
 inputs = {
