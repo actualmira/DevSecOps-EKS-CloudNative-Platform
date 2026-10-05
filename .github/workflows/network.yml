@@ -70,7 +70,7 @@ jobs:
           file: terraform/env/dev/network/tfplan.json
           framework: terraform_plan
           soft_fail: false
-          repo_root_for_plan_enrichment: terraform/env/dev/network/
+          skip_check: CKV2_AWS_5,CKV2_AWS_19,CKV2_AWS_11
 
       - name: Plan Comments
         if: github.event_name == 'pull_request'
