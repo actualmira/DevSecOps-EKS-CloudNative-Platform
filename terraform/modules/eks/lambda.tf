@@ -110,8 +110,8 @@ resource "aws_iam_role_policy" "patch_webhook" {
 # PATCH WEBHOOK LAMBDA
 data "archive_file" "patch_webhook" {
   type        = "zip"
-  source_dir  = "${path.module}/../../lambda/patch_webhook"
-  output_path = "${path.module}/../../lambda/zips/patch_webhook.zip"
+  source_dir  = "${var.lambda_source_path}/patch_webhook"
+  output_path = "${var.lambda_source_path}/zips/patch_webhook.zip"
 }
 
 resource "aws_lambda_function" "patch_webhook" {

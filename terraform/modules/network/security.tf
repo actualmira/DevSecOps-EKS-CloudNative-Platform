@@ -1,4 +1,16 @@
+# Default security group
+resource "aws_default_security_group" "default" {
+  vpc_id = aws_vpc.devsecops.id
+
+  tags = {
+    Name        = "${var.project}-${var.environment}-default-sg"
+    Environment = var.environment
+    Project     = var.project
+  }
+}
+
 # alb security group
+# checkov:skip=CKV2_AWS_5:Security groups attached to Load Balancer
 resource "aws_security_group" "alb" {
   name        = "${var.project}-${var.environment}-alb-sg"
   description = "Security group for Application Load Balancer"
@@ -11,7 +23,9 @@ resource "aws_security_group" "alb" {
   }
 }
 
+
 # app node security group
+# checkov:skip=CKV2_AWS_5:Security groups attached to EKS managed node groups
 resource "aws_security_group" "apps" {
   name        = "${var.project}-${var.environment}-apps-sg"
   description = "Security group for application node running DVWA"
@@ -25,6 +39,7 @@ resource "aws_security_group" "apps" {
 }
 
 # isolated node security group
+# checkov:skip=CKV2_AWS_5:Security groups attached to EKS managed node groups
 resource "aws_security_group" "isolated" {
   name        = "${var.project}-${var.environment}-isolated-sg"
   description = "Security group for isolated nodes running MariaDB and Vault"
@@ -38,6 +53,7 @@ resource "aws_security_group" "isolated" {
 }
 
 # observability node security group
+# checkov:skip=CKV2_AWS_5:Security groups attached to EKS managed node groups
 resource "aws_security_group" "observability_node" {
   name        = "${var.project}-${var.environment}-observability-node-sg"
   description = "Security group for observability node"

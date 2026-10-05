@@ -1,3 +1,4 @@
+# checkov:skip=CKV2_AWS_11:VPC Flow Logs managed in security module
 resource "aws_vpc" "devsecops" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
@@ -67,6 +68,7 @@ resource "aws_internet_gateway" "devsecops" {
   }
 }
 
+# checkov:skip=CKV2_AWS_19:EIP is attached to NAT Gateway
 resource "aws_eip" "nat" {
   domain     = "vpc"
   depends_on = [aws_internet_gateway.devsecops]

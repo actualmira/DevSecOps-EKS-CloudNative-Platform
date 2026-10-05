@@ -69,3 +69,7 @@ variable "github_repo" {
 variable "aws_region" {
   type = string
 }
+
+variable "lambda_source_path" {
+  type    = string
+}
