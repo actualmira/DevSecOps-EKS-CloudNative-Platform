@@ -100,6 +100,8 @@ resource "aws_kms_alias" "ssm_session_logs" {
 
 #Config
 data "aws_iam_policy_document" "config_kms_policy" {
+  # checkov:skip=CKV_AWS_109:Root account KMS key policy required by AWS
+  # checkov:skip=CKV_AWS_111:Root account KMS key policy required by AWS
   statement {
     sid    = "Permission for IAM Users"
     effect = "Allow"

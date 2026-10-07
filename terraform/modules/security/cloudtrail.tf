@@ -1,4 +1,7 @@
 resource "aws_s3_bucket" "cloudtrail" {
+  # checkov:skip=CKV_AWS_19:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
+  # checkov:skip=CKV_AWS_145:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
+  # checkov:skip=CKV_AWS_21:Versioning configured via separate aws_s3_bucket_versioning resource
   bucket              = "${var.project}-${var.environment}-cloudtrail-s3"
   object_lock_enabled = true
 

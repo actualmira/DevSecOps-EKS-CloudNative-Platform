@@ -31,6 +31,8 @@ resource "aws_config_configuration_recorder_status" "main" {
 
 resource "aws_s3_bucket" "config" {
   # checkov:skip=CKV_AWS_21:AWS Config maintains its configuration history.
+  # checkov:skip=CKV_AWS_19:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
+  # checkov:skip=CKV_AWS_145:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
   bucket = "${var.project}-${var.environment}-aws-config"
 
   tags = {
@@ -329,6 +331,7 @@ data "aws_iam_policy_document" "ssm_assume_role" {
 }
 
 data "aws_iam_policy_document" "config_s3_remediation_policy" {
+  # checkov:skip=CKV_AWS_111:s3:PutAccountPublicAccessBlock is an account-level API that require resources: "*" by design
   statement {
     sid    = "AllowSSMAutomation"
     effect = "Allow"

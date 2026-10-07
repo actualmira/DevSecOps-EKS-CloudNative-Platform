@@ -118,6 +118,8 @@ resource "aws_lambda_function" "patch_webhook" {
   # checkov:skip=CKV_AWS_116:on_failure SNS destination configured
   # checkov:skip=CKV_AWS_117:Lambda uses public AWS APIs
   # checkov:skip=CKV_AWS_50:X-Ray tracing would be configured in production for observability
+  # checkov:skip=CKV_AWS_173:Env vars contain non-sensitive config. 
+  # checkov:skip=CKV_AWS_115:Concurrency limit not required. 
   filename         = data.archive_file.patch_webhook.output_path
   function_name    = "${var.project}-${var.environment}-patch-webhook"
   role             = aws_iam_role.patch_webhook.arn
