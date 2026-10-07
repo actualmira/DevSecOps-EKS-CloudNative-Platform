@@ -89,8 +89,9 @@ jobs:
         uses: borchero/terraform-plan-comment@9c18ac901b5d2b58e9cbd9d1480af36e28ffaf88 # v2
         with:
           token: ${{ github.token }}
-          planfile: terraform/env/dev/eks/tfplan
+          planfile: tfplan
           terraform-cmd: terragrunt
+          working-directory: terraform/env/dev/eks
 
       - name: Terragrunt Apply
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
