@@ -2,6 +2,7 @@ data "aws_caller_identity" "current" {}
 
 # eks cluster
 resource "aws_cloudwatch_log_group" "eks_cluster" {
+  # checkov:skip=CKV_AWS_158:CloudWatch KMS encryption would be configured in production.
   name              = "/aws/eks/${var.project}-${var.environment}-cluster/cluster"
   retention_in_days = 30
 
@@ -74,11 +75,13 @@ resource "aws_eks_cluster" "devsecops" {
       var.isolated_subnet_ids
     )
 
+    # checkov:skip=CKV_AWS_39:Public endpoint required for cluster management from my VM and GitHub Actions CI\/CD workflows
+    # checkov:skip=CKV_AWS_38:CIDR restriction not feasible with dynamic GitHub Actions runner IPs. I would use self-hosted runners with private endpoint in production.
     endpoint_private_access = true
     endpoint_public_access  = true
   }
 
-  enabled_cluster_log_types = ["api", "audit", "authenticator"]
+  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
   encryption_config {
     provider {

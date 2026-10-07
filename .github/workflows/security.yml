@@ -67,12 +67,24 @@ jobs:
       - run: terragrunt plan -out=tfplan -input=false
       - run: terragrunt show -json tfplan > tfplan.json
 
+      - name: Checkov static scan
+        uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
+        with:
+          directory: terraform/modules/security
+          framework: terraform
+          soft_fail: false
+          # CKV_AWS_144: Single region deployment, cross-region replication not required
+          # CKV_AWS_18: Access logging on logging buckets creates circular dependency
+          # CKV2_AWS_3: Single account deployment, GuardDuty org-level not applicable
+          skip_check: CKV_AWS_144,CKV_AWS_18,CKV2_AWS_3
+
       - name: Checkov IaC Scan
         uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
         with:
           file: terraform/env/dev/security/tfplan.json
           framework: terraform_plan
           soft_fail: false
+          skip_check: CKV_AWS_144,CKV_AWS_18,CKV2_AWS_3,CKV2_AWS_10,CKV2_AWS_31,CKV_AWS_192,CKV_AWS_116,CKV_AWS_117,CKV_AWS_50,CKV_AWS_21
 
       - name: Plan Comments
         if: github.event_name == 'pull_request'

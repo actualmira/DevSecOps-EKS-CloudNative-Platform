@@ -30,6 +30,7 @@ resource "aws_config_configuration_recorder_status" "main" {
 }
 
 resource "aws_s3_bucket" "config" {
+  # checkov:skip=CKV_AWS_21:AWS Config maintains its configuration history.
   bucket = "${var.project}-${var.environment}-aws-config"
 
   tags = {

@@ -1,4 +1,5 @@
 resource "aws_s3_bucket" "flow_logs" {
+  # checkov:skip=CKV_AWS_21:Versioning not required for flow logs
   bucket = "${var.project}-${var.environment}-flow-logs"
 
   tags = {
@@ -14,6 +15,16 @@ resource "aws_s3_bucket_public_access_block" "flow_logs" {
   ignore_public_acls      = true
   block_public_policy     = true
   restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "flow_logs" {
+  bucket = aws_s3_bucket.flow_logs.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "aws:kms"
+    }
+    bucket_key_enabled = true
+  }
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "flow_logs" {

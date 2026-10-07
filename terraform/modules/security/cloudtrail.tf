@@ -101,6 +101,7 @@ resource "aws_s3_bucket_policy" "cloudtrail" {
 }
 
 resource "aws_cloudtrail" "cloudtrail" {
+  # checkov:skip=CKV2_AWS_10: Used S3 for cost management. CloudWatch Logs would be integrated in production. 
   name                          = "${var.project}-${var.environment}-cloudtrail"
   s3_bucket_name                = aws_s3_bucket.cloudtrail.id
   include_global_service_events = true

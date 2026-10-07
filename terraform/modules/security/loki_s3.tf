@@ -1,5 +1,6 @@
 # loki s3 
 resource "aws_s3_bucket" "loki" {
+  # checkov:skip=CKV_AWS_21:Loki log is append-only data and the storage uses lifecycle expiration for retention. 
   bucket = "${var.project}-${var.environment}-loki-logs"
 
   tags = {

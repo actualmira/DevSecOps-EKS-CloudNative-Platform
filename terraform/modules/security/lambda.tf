@@ -186,6 +186,9 @@ data "archive_file" "remediate_security_group" {
 }
 
 resource "aws_lambda_function" "revoke_iam_session" {
+  # checkov:skip=CKV_AWS_116:on_failure SNS destination configured
+  # checkov:skip=CKV_AWS_117:Lambda uses public AWS APIs
+  # checkov:skip=CKV_AWS_50:X-Ray tracing would be configured in production for observability
   filename         = data.archive_file.revoke_iam_session.output_path
   function_name    = "${var.project}-${var.environment}-revoke-iam-session"
   role             = aws_iam_role.revoke_iam_session.arn
@@ -208,6 +211,9 @@ resource "aws_lambda_function" "revoke_iam_session" {
 }
 
 resource "aws_lambda_function" "remediate_cloudtrail" {
+  # checkov:skip=CKV_AWS_116:on_failure SNS destination configured
+  # checkov:skip=CKV_AWS_117:Lambda uses public AWS APIs
+  # checkov:skip=CKV_AWS_50:X-Ray tracing would be configured in production for observability
   filename         = data.archive_file.remediate_cloudtrail.output_path
   function_name    = "${var.project}-${var.environment}-remediate-cloudtrail"
   role             = aws_iam_role.remediate_cloudtrail.arn
@@ -231,6 +237,9 @@ resource "aws_lambda_function" "remediate_cloudtrail" {
 }
 
 resource "aws_lambda_function" "remediate_security_group" {
+  # checkov:skip=CKV_AWS_116:on_failure SNS destination configured
+  # checkov:skip=CKV_AWS_117:Lambda uses public AWS APIs
+  # checkov:skip=CKV_AWS_50:X-Ray tracing would be configured in production for observability
   filename         = data.archive_file.remediate_security_group.output_path
   function_name    = "${var.project}-${var.environment}-remediate-security-group"
   role             = aws_iam_role.remediate_security_group.arn

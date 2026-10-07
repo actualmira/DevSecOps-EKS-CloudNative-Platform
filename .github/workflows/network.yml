@@ -65,6 +65,13 @@ jobs:
       - run: terragrunt plan -out=tfplan -input=false
       - run: terragrunt show -json tfplan > tfplan.json
 
+      - name: Checkov static scan
+        uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
+        with:
+          directory: terraform/modules/network
+          framework: terraform
+          soft_fail: false
+
       - name: Checkov IaC Scan
         uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
         with:

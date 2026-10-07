@@ -1,5 +1,6 @@
 # Private repo for DVWA 
 resource "aws_ecr_repository" "dvwa" {
+  # checkov:skip=CKV_AWS_136:ECR KMS encryption would be configured in production
   name                 = "${var.project}-${var.environment}-dvwa"
   image_tag_mutability = "IMMUTABLE"
 
