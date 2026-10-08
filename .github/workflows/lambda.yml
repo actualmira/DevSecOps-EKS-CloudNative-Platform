@@ -1,0 +1,36 @@
+name: Lambda Security Pipeline
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lambda/**'
+  push:
+    branches: [main]
+    paths:
+      - 'lambda/**'
+
+permissions:
+  contents: read
+
+jobs:
+  lambda-gates:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - run: pip install semgrep==1.178.0
+
+      - name: Semgrep SAST
+        run: semgrep scan --config auto lambda/ --error --severity ERROR
+
+      - name: Trivy SCA
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: fs
+          scan-ref: lambda/
+          skip-dirs: lambda/zips
+          severity: HIGH,CRITICAL
+          exit-code: '1'

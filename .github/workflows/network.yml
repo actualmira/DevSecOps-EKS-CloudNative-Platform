@@ -1,0 +1,94 @@
+name: Network Pipeline
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'terraform/env/dev/network/**'
+      - 'terraform/modules/network/**'
+  push:
+    branches: [main]
+    paths:
+      - 'terraform/env/dev/network/**'
+      - 'terraform/modules/network/**'
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  AWS_REGION: eu-west-1
+  TG_DEPENDENCY_FETCH_OUTPUT_FROM_STATE: "true"
+  ROLE_ARN: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && secrets.AWS_ROLE_ARN_NETWORK_APPLY || secrets.AWS_ROLE_ARN_NETWORK_PLAN }}
+
+jobs:
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: trufflesecurity/trufflehog@f714bf454f350590f4a24c3ddb1aef02c35bf5b6 # v3.97.5
+        with:
+          extra_args: --only-verified
+
+  terraform:
+    needs: secrets-scan
+    runs-on: ubuntu-latest
+    environment: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'production' || '' }}
+    defaults:
+      run:
+        working-directory: terraform/env/dev/network
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Terragrunt
+        uses: datadrivers/terragrunt-action@d999c649191a9c3cb22b5dce115c4d74204f53fa # v4.5.1
+        env:
+          TENV_GITHUB_TOKEN: ${{ github.token }}
+        with:
+          use-aws-auth: "true"
+          aws-region: ${{ env.AWS_REGION }}
+          aws-role-to-assume: ${{ env.ROLE_ARN }}
+          terraform-version: "1.16.5"
+          terragrunt-version: "1.1.6"
+
+      - name: fmt check
+        working-directory: ${{ github.workspace }}
+        run: terraform fmt -check -recursive terraform/modules/network || true
+
+      - run: terragrunt init
+      - run: terragrunt validate
+      - run: terragrunt plan -out=tfplan -input=false
+      - run: terragrunt show -json tfplan > tfplan.json
+
+      - name: Checkov static scan
+        uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
+        with:
+          directory: terraform/modules/network
+          framework: terraform
+          soft_fail: false
+
+      - name: Checkov IaC Scan
+        uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
+        with:
+          file: terraform/env/dev/network/tfplan.json
+          framework: terraform_plan
+          soft_fail: false
+          skip_check: CKV2_AWS_5,CKV2_AWS_19,CKV2_AWS_11
+
+      - name: Plan Comments
+        if: github.event_name == 'pull_request'
+        uses: borchero/terraform-plan-comment@9c18ac901b5d2b58e9cbd9d1480af36e28ffaf88 # v2
+        with:
+          token: ${{ github.token }}
+          planfile: tfplan
+          terraform-cmd: terragrunt
+          working-directory: terraform/env/dev/network
+
+      - name: Terragrunt Apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: terragrunt apply -input=false tfplan

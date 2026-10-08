@@ -1,71 +1,75 @@
 variable "environment" {
-  type        = string
+  type = string
 }
 
 variable "project" {
-  type        = string
+  type = string
 }
 
 variable "kubernetes_version" {
-  type        = string
-  default     = "1.35"
+  type    = string
+  default = "1.35"
 }
 
 variable "vpc_id" {
-  type        = string
+  type = string
 }
 
 variable "private_subnet_ids" {
-  type        = list(string)
+  type = list(string)
 }
 
 variable "isolated_subnet_ids" {
-  type        = list(string)
+  type = list(string)
 }
 
 variable "apps_security_group_id" {
-  type        = string
+  type = string
 }
 
 variable "isolated_security_group_id" {
-  type        = string
+  type = string
 }
 
 variable "sts_vpc_endpoint_id" {
-  type        = string
+  type = string
 }
 
 variable "ssm_session_logging_policy_arn" {
-  type        = string
+  type = string
 }
 
 variable "observability_security_group_id" {
-  type        = string
+  type = string
 }
 
 variable "loki_s3_bucket_arn" {
-  type        = string
+  type = string
 }
 
 variable "loki_kms_key_id" {
-  type        = string
+  type = string
 }
 
 variable "alertmanager_sns_topic_arn" {
-  type        = string
+  type = string
 }
 variable "ssm_session_logs_bucket_id" {
-  type        = string
+  type = string
 }
 
 variable "github_org" {
-  type        = string
+  type = string
 }
 
 variable "github_repo" {
-  type        = string
+  type = string
 }
 
 variable "aws_region" {
-  type        = string
+  type = string
+}
+
+variable "lambda_source_path" {
+  type    = string
 }

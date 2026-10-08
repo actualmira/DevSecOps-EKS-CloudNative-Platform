@@ -19,7 +19,7 @@ data "aws_iam_policy_document" "lambda_assume_role" {
 
 # SNS TOPIC FOR PATCH WEBHOOK FAILURES
 resource "aws_sns_topic" "patch_remediation" {
-  name = "${var.project}-${var.environment}-patch-remediation"
+  name              = "${var.project}-${var.environment}-patch-remediation"
   kms_master_key_id = "alias/aws/sns"
 
   tags = {
@@ -94,9 +94,9 @@ data "aws_iam_policy_document" "patch_webhook_policy" {
   }
 
   statement {
-    sid     = "PublishToSNS"
-    effect  = "Allow"
-    actions = ["sns:Publish"]
+    sid       = "PublishToSNS"
+    effect    = "Allow"
+    actions   = ["sns:Publish"]
     resources = [aws_sns_topic.patch_remediation.arn]
   }
 }
@@ -110,11 +110,16 @@ resource "aws_iam_role_policy" "patch_webhook" {
 # PATCH WEBHOOK LAMBDA
 data "archive_file" "patch_webhook" {
   type        = "zip"
-  source_dir  = "${path.module}/../../lambda/patch_webhook"
-  output_path = "${path.module}/../../lambda/zips/patch_webhook.zip"
+  source_dir  = "${var.lambda_source_path}/patch_webhook"
+  output_path = "${var.lambda_source_path}/zips/patch_webhook.zip"
 }
 
 resource "aws_lambda_function" "patch_webhook" {
+  # checkov:skip=CKV_AWS_116:on_failure SNS destination configured
+  # checkov:skip=CKV_AWS_117:Lambda uses public AWS APIs
+  # checkov:skip=CKV_AWS_50:X-Ray tracing would be configured in production for observability
+  # checkov:skip=CKV_AWS_173:Env vars contain non-sensitive config. 
+  # checkov:skip=CKV_AWS_115:Concurrency limit not required. 
   filename         = data.archive_file.patch_webhook.output_path
   function_name    = "${var.project}-${var.environment}-patch-webhook"
   role             = aws_iam_role.patch_webhook.arn
@@ -125,10 +130,10 @@ resource "aws_lambda_function" "patch_webhook" {
 
   environment {
     variables = {
-      GITHUB_SECRET_ARN  = data.aws_secretsmanager_secret.github_pat.arn
-      GITHUB_ORG         = var.github_org
-      GITHUB_REPO        = var.github_repo
-      AWS_REGION_NAME    = var.aws_region
+      GITHUB_SECRET_ARN = data.aws_secretsmanager_secret.github_pat.arn
+      GITHUB_ORG        = var.github_org
+      GITHUB_REPO       = var.github_repo
+      AWS_REGION_NAME   = var.aws_region
     }
   }
 

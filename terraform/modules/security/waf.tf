@@ -1,4 +1,6 @@
 resource "aws_wafv2_web_acl" "dvwa" {
+  # checkov:skip=CKV_AWS_192:Log4j WAF rule not applicable, DVWA is a PHP application
+  # checkov:skip=CKV2_AWS_31:WAF logging would be configured in production using Kinesis Firehose
   name        = "${var.project}-${var.environment}-dvwa-waf"
   description = "WAF WebACL protecting DVWA from SQL injection, XSS and HTTP floods"
   scope       = "REGIONAL"
@@ -61,8 +63,8 @@ resource "aws_wafv2_web_acl" "dvwa" {
 
     statement {
       rate_based_statement {
-        limit              = 100
-        aggregate_key_type = "IP"
+        limit                 = 100
+        aggregate_key_type    = "IP"
         evaluation_window_sec = 60
       }
     }

@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trust-manager
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  sources:
+    - repoURL: https://charts.jetstack.io
+      chart: trust-manager
+      targetRevision: "0.25.0"
+      helm:
+        valueFiles:
+          - $values/k8s/trust-manager/trust-manager-values.yaml
+    - repoURL: https://github.com/actualmira/DevSecOps-EKS-CloudNative-Platform.git
+      targetRevision: main
+      path: k8s/trust-manager
+      directory:
+        exclude: "*-values.yaml"
+    - repoURL: https://github.com/actualmira/DevSecOps-EKS-CloudNative-Platform.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated: {}

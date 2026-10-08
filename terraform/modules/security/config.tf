@@ -15,7 +15,7 @@ resource "aws_config_configuration_recorder" "main" {
 resource "aws_config_delivery_channel" "main" {
   name           = "${var.project}-${var.environment}-config-delivery"
   s3_bucket_name = aws_s3_bucket.config.id
-  
+
   snapshot_delivery_properties {
     delivery_frequency = "TwentyFour_Hours"
   }
@@ -30,6 +30,9 @@ resource "aws_config_configuration_recorder_status" "main" {
 }
 
 resource "aws_s3_bucket" "config" {
+  # checkov:skip=CKV_AWS_21:AWS Config maintains its configuration history.
+  # checkov:skip=CKV_AWS_19:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
+  # checkov:skip=CKV_AWS_145:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
   bucket = "${var.project}-${var.environment}-aws-config"
 
   tags = {
@@ -288,8 +291,8 @@ resource "aws_s3_account_public_access_block" "main" {
 }
 
 resource "aws_config_config_rule" "s3_account_public_block" {
-  name        = "${var.project}-${var.environment}-s3-account-public-block"
-  
+  name = "${var.project}-${var.environment}-s3-account-public-block"
+
   source {
     owner             = "AWS"
     source_identifier = "S3_ACCOUNT_LEVEL_PUBLIC_ACCESS_BLOCKS"
@@ -328,6 +331,7 @@ data "aws_iam_policy_document" "ssm_assume_role" {
 }
 
 data "aws_iam_policy_document" "config_s3_remediation_policy" {
+  # checkov:skip=CKV_AWS_111:s3:PutAccountPublicAccessBlock is an account-level API that require resources: "*" by design
   statement {
     sid    = "AllowSSMAutomation"
     effect = "Allow"
@@ -356,9 +360,9 @@ resource "aws_iam_role_policy" "config_s3_remediation" {
 }
 
 resource "aws_config_remediation_configuration" "s3_account_public_block" {
-  config_rule_name = aws_config_config_rule.s3_account_public_block.name
-  target_type      = "SSM_DOCUMENT"
-  target_id        = "AWSConfigRemediation-ConfigureS3PublicAccessBlock"
+  config_rule_name           = aws_config_config_rule.s3_account_public_block.name
+  target_type                = "SSM_DOCUMENT"
+  target_id                  = "AWSConfigRemediation-ConfigureS3PublicAccessBlock"
   automatic                  = true
   maximum_automatic_attempts = 5
   retry_attempt_seconds      = 60

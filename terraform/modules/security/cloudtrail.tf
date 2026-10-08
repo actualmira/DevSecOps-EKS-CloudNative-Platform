@@ -1,4 +1,7 @@
 resource "aws_s3_bucket" "cloudtrail" {
+  # checkov:skip=CKV_AWS_19:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
+  # checkov:skip=CKV_AWS_145:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
+  # checkov:skip=CKV_AWS_21:Versioning configured via separate aws_s3_bucket_versioning resource
   bucket              = "${var.project}-${var.environment}-cloudtrail-s3"
   object_lock_enabled = true
 
@@ -101,13 +104,14 @@ resource "aws_s3_bucket_policy" "cloudtrail" {
 }
 
 resource "aws_cloudtrail" "cloudtrail" {
+  # checkov:skip=CKV2_AWS_10: Used S3 for cost management. CloudWatch Logs would be integrated in production. 
   name                          = "${var.project}-${var.environment}-cloudtrail"
   s3_bucket_name                = aws_s3_bucket.cloudtrail.id
   include_global_service_events = true
   is_multi_region_trail         = true
   enable_log_file_validation    = true
   kms_key_id                    = aws_kms_key.cloudtrail.arn
-  
+
   tags = {
     Name        = "${var.project}-${var.environment}-cloudtrail"
     Environment = var.environment

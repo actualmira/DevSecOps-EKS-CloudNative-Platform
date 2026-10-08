@@ -2,6 +2,7 @@ data "aws_caller_identity" "current" {}
 
 # eks cluster
 resource "aws_cloudwatch_log_group" "eks_cluster" {
+  # checkov:skip=CKV_AWS_158:CloudWatch KMS encryption would be configured in production.
   name              = "/aws/eks/${var.project}-${var.environment}-cluster/cluster"
   retention_in_days = 30
 
@@ -74,11 +75,13 @@ resource "aws_eks_cluster" "devsecops" {
       var.isolated_subnet_ids
     )
 
+    # checkov:skip=CKV_AWS_39:Public endpoint required for cluster management from my VM and GitHub Actions CI\/CD workflows
+    # checkov:skip=CKV_AWS_38:CIDR restriction not feasible with dynamic GitHub Actions runner IPs. I would use self-hosted runners with private endpoint in production.
     endpoint_private_access = true
     endpoint_public_access  = true
   }
 
-  enabled_cluster_log_types = ["api", "audit", "authenticator"]
+  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
   encryption_config {
     provider {
@@ -175,9 +178,9 @@ resource "aws_security_group" "node_shared" {
   vpc_id      = var.vpc_id
 
   tags = {
-    Name        = "${var.project}-${var.environment}-node-shared-sg"
-    Environment = var.environment
-    Project     = var.project
+    Name                                                              = "${var.project}-${var.environment}-node-shared-sg"
+    Environment                                                       = var.environment
+    Project                                                           = var.project
     "kubernetes.io/cluster/${var.project}-${var.environment}-cluster" = "owned"
   }
 }
@@ -294,7 +297,7 @@ resource "aws_iam_role_policy_attachment" "isolated_node_ssm" {
 resource "aws_iam_role_policy_attachment" "isolated_node_ssm_session_logging" {
   role       = aws_iam_role.isolated_node.name
   policy_arn = var.ssm_session_logging_policy_arn
-} 
+}
 
 # observability node
 resource "aws_iam_role" "observability_node" {
@@ -353,18 +356,18 @@ resource "aws_launch_template" "apps" {
   ]
 
   metadata_options {
-    http_tokens                = "required"
+    http_tokens                 = "required"
     http_put_response_hop_limit = 1
     http_endpoint               = "enabled"
   }
 
-  
+
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name        = "${var.project}-${var.environment}-apps-node"
-      Environment = var.environment
-      Project     = var.project
+      Name          = "${var.project}-${var.environment}-apps-node"
+      Environment   = var.environment
+      Project       = var.project
       "Patch Group" = aws_ssm_patch_group.eks_nodes.patch_group
     }
   }
@@ -386,7 +389,7 @@ resource "aws_launch_template" "isolated" {
   ]
 
   metadata_options {
-    http_tokens                = "required"
+    http_tokens                 = "required"
     http_put_response_hop_limit = 1
     http_endpoint               = "enabled"
   }
@@ -395,9 +398,9 @@ resource "aws_launch_template" "isolated" {
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name        = "${var.project}-${var.environment}-isolated-node"
-      Environment = var.environment
-      Project     = var.project
+      Name          = "${var.project}-${var.environment}-isolated-node"
+      Environment   = var.environment
+      Project       = var.project
       "Patch Group" = aws_ssm_patch_group.eks_nodes.patch_group
     }
   }

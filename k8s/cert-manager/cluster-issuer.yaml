@@ -1,12 +1,9 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: cert-manager
----
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
   name: cluster-issuer
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   selfSigned: {}
 ---
@@ -31,6 +28,7 @@ apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
   name: internal-ca-issuer
+  annotations:
 spec:
   ca:
     secretName: internal-ca-secret

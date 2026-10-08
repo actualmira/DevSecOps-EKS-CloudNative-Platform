@@ -1,5 +1,17 @@
+# Default security group
+resource "aws_default_security_group" "default" {
+  vpc_id = aws_vpc.devsecops.id
+
+  tags = {
+    Name        = "${var.project}-${var.environment}-default-sg"
+    Environment = var.environment
+    Project     = var.project
+  }
+}
+
 # alb security group
 resource "aws_security_group" "alb" {
+  # checkov:skip=CKV2_AWS_5:Security groups attached to LB
   name        = "${var.project}-${var.environment}-alb-sg"
   description = "Security group for Application Load Balancer"
   vpc_id      = aws_vpc.devsecops.id
@@ -11,10 +23,12 @@ resource "aws_security_group" "alb" {
   }
 }
 
+
 # app node security group
 resource "aws_security_group" "apps" {
+  # checkov:skip=CKV2_AWS_5:Security groups attached to EKS managed node groups
   name        = "${var.project}-${var.environment}-apps-sg"
-  description = "Security group for application nodes running DVWA, ESO, Observability, Falco"
+  description = "Security group for application node running DVWA"
   vpc_id      = aws_vpc.devsecops.id
 
   tags = {
@@ -26,6 +40,7 @@ resource "aws_security_group" "apps" {
 
 # isolated node security group
 resource "aws_security_group" "isolated" {
+  # checkov:skip=CKV2_AWS_5:Security groups attached to EKS managed node groups
   name        = "${var.project}-${var.environment}-isolated-sg"
   description = "Security group for isolated nodes running MariaDB and Vault"
   vpc_id      = aws_vpc.devsecops.id
@@ -39,6 +54,7 @@ resource "aws_security_group" "isolated" {
 
 # observability node security group
 resource "aws_security_group" "observability_node" {
+  # checkov:skip=CKV2_AWS_5:Security groups attached to EKS managed node groups
   name        = "${var.project}-${var.environment}-observability-node-sg"
   description = "Security group for observability node"
   vpc_id      = aws_vpc.devsecops.id
@@ -140,7 +156,7 @@ resource "aws_vpc_security_group_egress_rule" "eso_to_vault" {
 
 resource "aws_vpc_security_group_egress_rule" "apps_to_internet" {
   security_group_id = aws_security_group.apps.id
-  cidr_ipv4          = "0.0.0.0/0"
+  cidr_ipv4         = "0.0.0.0/0"
   from_port         = 443
   to_port           = 443
   ip_protocol       = "tcp"

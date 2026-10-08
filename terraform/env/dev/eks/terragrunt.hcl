@@ -18,20 +18,20 @@ dependency "network" {
     sts_vpc_endpoint_id              = "sts-endpoint-id"
   }
 
-  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "show", "destroy"]
 }
 
 dependency "security" {
   config_path = "../security"
 
   mock_outputs = {
-    ssm_session_logging_policy_arn = "arn:aws:iam::mock:policy/ssm-logging"
+    ssm_session_logging_policy_arn = "arn:aws:iam::123456789012:policy/ssm-logging"
     loki_s3_bucket_arn             = "arn:aws:s3:::mock-loki-bucket"
     loki_kms_key_id                = "mock-kms-key-id"
-    alertmanager_sns_topic_arn     = "arn:aws:sns:eu-west-1:mock:alertmanager-alerts"
+    alertmanager_sns_topic_arn     = "arn:aws:sns:eu-west-1:123456789012:alertmanager-alerts"
     ssm_session_logs_bucket_id     = "ssm-logs-bucket"
   }
-  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "destroy"]
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan", "show", "destroy"]
 }
 
 inputs = {
@@ -51,4 +51,5 @@ inputs = {
   github_org                      = "actualmira"
   github_repo                     = "DevSecOps-EKS-CloudNative-Platform"
   aws_region                      = "eu-west-1"
+  lambda_source_path              = abspath("${get_repo_root()}/lambda")
 }

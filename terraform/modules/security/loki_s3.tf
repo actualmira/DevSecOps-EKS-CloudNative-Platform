@@ -1,4 +1,8 @@
+# loki s3 
 resource "aws_s3_bucket" "loki" {
+  # checkov:skip=CKV_AWS_21:Loki log is append-only data and the storage uses lifecycle expiration for retention. 
+  # checkov:skip=CKV_AWS_145:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
+  # checkov:skip=CKV_AWS_19:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
   bucket = "${var.project}-${var.environment}-loki-logs"
 
   tags = {
@@ -24,7 +28,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "loki" {
       kms_master_key_id = aws_kms_key.loki.arn
     }
     bucket_key_enabled = true
-  }  
+  }
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "loki" {
