@@ -1,5 +1,5 @@
 resource "aws_vpc" "devsecops" {
-  # checkov:skip=CKV2_AWS_11:VPC Flow Logs managed in security module
+  # checkov:skip=CKV2_AWS_11:VPC Flow Logs is managed in security module
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
   enable_dns_support   = true
