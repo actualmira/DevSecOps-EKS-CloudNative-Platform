@@ -2,7 +2,7 @@ resource "aws_s3_bucket" "ssm_session_logs" {
   # checkov:skip=CKV_AWS_19:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
   # checkov:skip=CKV_AWS_145:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
   # checkov:skip=CKV_AWS_21:Versioning configured via separate aws_s3_bucket_versioning resource
-  bucket              = "${var.project}-${var.environment}-ssm-session-logs"
+  bucket              = "${var.project}-${var.environment}-ssm-session-logs-${data.aws_caller_identity.current.account_id}"
   object_lock_enabled = true
   tags = {
     Name        = "${var.project}-${var.environment}-ssm-session-logs"

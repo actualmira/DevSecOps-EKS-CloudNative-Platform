@@ -2,7 +2,7 @@ resource "aws_s3_bucket" "flow_logs" {
   # checkov:skip=CKV_AWS_21:Versioning not required for flow logs
   # checkov:skip=CKV_AWS_19:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
   # checkov:skip=CKV_AWS_145:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
-  bucket = "${var.project}-${var.environment}-flow-logs"
+  bucket = "${var.project}-${var.environment}-flow-logs-${data.aws_caller_identity.current.account_id}"
 
   tags = {
     Name        = "${var.project}-${var.environment}-flow-logs"
