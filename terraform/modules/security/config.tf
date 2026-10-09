@@ -33,7 +33,7 @@ resource "aws_s3_bucket" "config" {
   # checkov:skip=CKV_AWS_21:AWS Config maintains its configuration history.
   # checkov:skip=CKV_AWS_19:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
   # checkov:skip=CKV_AWS_145:Encryption configured via separate aws_s3_bucket_server_side_encryption_configuration resource
-  bucket = "${var.project}-${var.environment}-aws-config"
+  bucket = "${var.project}-${var.environment}-aws-config-${data.aws_caller_identity.current.account_id}"
 
   tags = {
     Name        = "${var.project}-${var.environment}-aws-config"
