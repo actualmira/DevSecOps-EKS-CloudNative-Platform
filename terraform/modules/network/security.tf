@@ -9,7 +9,7 @@ resource "aws_default_security_group" "default" {
   }
 }
 
-# alb security group
+# ALB security group
 resource "aws_security_group" "alb" {
   # checkov:skip=CKV2_AWS_5:Security groups attached to LB
   name        = "${var.project}-${var.environment}-alb-sg"
