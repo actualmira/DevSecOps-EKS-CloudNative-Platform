@@ -1,3 +1,7 @@
+data "aws_kms_key" "terraform_state" {
+  key_id = "alias/terraform-state-key"
+}
+
 terraform {
   required_providers {
     aws = {
@@ -84,7 +88,7 @@ resource "aws_iam_policy" "terraform_state_access" {
         Sid    = "StateKMS"
         Effect = "Allow"
         Action = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
-        Resource = "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alias/terraform-state-key"
+        Resource = data.aws_kms_key.terraform_state.arn
       }
     ]
   })

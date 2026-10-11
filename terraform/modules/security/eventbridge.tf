@@ -63,7 +63,7 @@ resource "aws_cloudwatch_event_target" "guardduty_immediate_alert" {
 }
 
 
-# CONFIG CRITICAL CLOUDTRAIL
+# CONFIG CRITICAL FOR CLOUDTRAIL
 resource "aws_cloudwatch_event_rule" "config_critical_cloudtrail" {
   name        = "${var.project}-${var.environment}-config-critical-cloudtrail"
   description = "Triggers the main CloudTrail to be re-enabled when disabled"
