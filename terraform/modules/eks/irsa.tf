@@ -109,7 +109,7 @@ resource "aws_iam_role_policy_attachment" "vault_kms_unseal" {
   policy_arn = aws_iam_policy.vault_kms_unseal.arn
 }
 
-# Load Balancer Controller IRSA
+# LBC IRSA
 data "aws_iam_policy_document" "aws_lbc_assume_role" {
   statement {
     effect  = "Allow"
