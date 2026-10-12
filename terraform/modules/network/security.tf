@@ -24,7 +24,7 @@ resource "aws_security_group" "alb" {
 }
 
 
-# app node security group
+# App node security group
 resource "aws_security_group" "apps" {
   # checkov:skip=CKV2_AWS_5:Security groups attached to EKS managed node groups
   name        = "${var.project}-${var.environment}-apps-sg"
@@ -38,7 +38,7 @@ resource "aws_security_group" "apps" {
   }
 }
 
-# isolated node security group
+# Isolated node security group
 resource "aws_security_group" "isolated" {
   # checkov:skip=CKV2_AWS_5:Security groups attached to EKS managed node groups
   name        = "${var.project}-${var.environment}-isolated-sg"
