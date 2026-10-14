@@ -139,8 +139,7 @@ data "aws_iam_policy_document" "network_apply" {
   }
 
   # KMS key scoped to account and region only
-  # In production with stable modules, would scope to the specific VPC flow logs key ARN via data source.
-  # the security module key ARN will be available 
+  # In production with stable modules, would scope to the specific VPC flow logs key ARN via data source. 
   statement {
     sid    = "KMSKey"
     effect = "Allow"
