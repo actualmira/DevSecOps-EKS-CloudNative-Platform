@@ -7,9 +7,9 @@ loki:
   storage:
     type: s3
     bucketNames:
-      chunks: devsecops-dev-loki-logs
-      ruler: devsecops-dev-loki-logs
-      admin: devsecops-dev-loki-logs
+      chunks: devsecops-dev-loki-logs-853184314323
+      ruler: devsecops-dev-loki-logs-853184314323
+      admin: devsecops-dev-loki-logs-853184314323
     s3:
       region: eu-west-1
       s3ForcePathStyle: false

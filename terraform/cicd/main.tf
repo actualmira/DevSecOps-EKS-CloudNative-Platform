@@ -182,12 +182,20 @@ resource "aws_iam_role" "apply" {
   }
 }
 
-# I will streamline the broad administrator access after running IAM Access Analyzer
-resource "aws_iam_role_policy_attachment" "apply_admin" {
-  for_each = local.workflows
+# Streamlined after running IAM Access Analyzer
+resource "aws_iam_role_policy_attachment" "network_apply_policy" {
+  role       = aws_iam_role.apply["network"].name
+  policy_arn = aws_iam_policy.network_apply.arn
+}
 
-  role       = aws_iam_role.apply[each.key].name
-  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+resource "aws_iam_role_policy_attachment" "security_apply_policy" {
+  role       = aws_iam_role.apply["security"].name
+  policy_arn = aws_iam_policy.security_apply.arn
+}
+
+resource "aws_iam_role_policy_attachment" "eks_apply_policy" {
+  role       = aws_iam_role.apply["eks"].name
+  policy_arn = aws_iam_policy.eks_apply.arn
 }
 
 resource "aws_iam_role_policy_attachment" "apply_state" {

@@ -113,7 +113,7 @@ falcosidekick:
       hostport: "http://loki-gateway.observability.svc.cluster.local"
       minimumpriority: "warning"
     stdout:
-      enabled: false
+      enabled: true
 
 
 

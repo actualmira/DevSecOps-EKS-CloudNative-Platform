@@ -24,7 +24,7 @@ spec:
         runAsUser: 998
       containers:
         - name: dvwa
-          image: ghcr.io/digininja/dvwa:33e364c
+          image: 853184314323.dkr.ecr.eu-west-1.amazonaws.com/devsecops-dev-dvwa:8320cb2e9d3fba8353569cf31d1d4893e4d54bee
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

@@ -1,3 +1,3 @@
-# DVWA image
+# DVWA custom image
 FROM ghcr.io/digininja/dvwa:d053c4d
 USER 998
