@@ -43,7 +43,7 @@ Defense-in-depth security for cloud-native applications on AWS EKS covering thre
 - [EventBridge and Lambda Automated Remediation](#eventbridge-and-lambda-automated-remediation)
 - [Observability and Monitoring](#observability-and-monitoring)
 - [Branch Protection, AWS OIDC, and Workflow IAM Roles](#branch-protection-aws-oidc-and-workflow-iam-roles)
-- [CI/CD Pipelines and GitOps with ArgoCD](#ci/cd-pipelines-and-gitops-with-argocd)
+- [CI/CD Pipelines and GitOps with ArgoCD](#cicd-pipelines-and-gitops-with-argocd)
 
 ---
 
@@ -599,7 +599,7 @@ targets:
 
 ## EKS Cluster, OIDC and Node Management
 
-**[Cluster Configuration](terraform/modules/eks/main.tf)**
+**[Cluster Configuration](terraform/modules/eks/eks.tf)**
   
 - I provisioned the EKS cluster with both public and private API endpoint access. I enabled public access to be able to manage the cluster from my VM. In a production environment, it should be Private-only access with a bastion or VPN to run kubectl.
 
@@ -828,7 +828,7 @@ In this project, I used port forwarding to access the dashboard, I could also al
 
 - In production, I could migrate to keyless signing using Sigstore’s OIDC flow to eliminate long lived static keys and the risk of any admin bypassing the build pipeline. This way, the ephemeral private key exists only in memory during the signing step and every signing event recorded in Sigstore’s immutable log, providing an audit trail tied to the exact workflow identity. 
 
-- I would also close the supply chain loop by integrating OPA Gatekeeper with Ratify to so that any pod referencing an image without a valid co-sign signature is rejected admission. This enforces that only images built and signed by the CI pipeline can run in the cluster.
+- I would also close the supply chain loop by integrating OPA Gatekeeper with Ratify to so that any pod referencing an image without a valid co-sign signature is rejected at admission. This enforces that only images built and signed by the CI pipeline can run in the cluster.
 
 - I use Trivy for SBOM generation. The SBOM provides an inventory of every package in the image which is useful for auditing and for identifying affected images quickly when a new CVE is published. I deliberately disabled vulnerability scanning because DVWA is a vulnerable application by design and scanning it would generate hundreds of findings that would need to be suppressed. In a production environment, I would enable vulnerability scanning and integrate Dependabot alongside Trivy to monitor upstream registries and opens PRs before vulnerabilities are introduced.
 
@@ -836,7 +836,7 @@ In this project, I used port forwarding to access the dashboard, I could also al
 
 **[Kubernetes Pipeline](.github/workflows/kubernetes.yml)**
 
-- The Kubernetes pipeline is triggered on any change to the [k8s/ directory](k8s).
+- The Kubernetes pipeline is triggered on any change to the [k8s/](k8s) or [argocd](argocd) directories.
 
 - I use Kubeconform to validate all manifests against the Kubernetes API schema before they reach the cluster. This catches structural errors like wrong field names, invalid API versions, missing required fields that would cause failures at apply time.
 
