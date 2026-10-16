@@ -19,13 +19,14 @@ Defense-in-depth security for cloud-native applications on AWS EKS covering thre
 
 - I configured SSM Session Manager as the only administrative access path to nodes, logging all session activity to an Object-Locked S3 bucket and CloudWatch for real-time monitoring. I configured SSM Patch Manager with a scan-only baseline on a weekly maintenance window, routing scan output to S3 for compliance evidence.
 
+- I automated the patching loop by configuring an EventBridge rule to detect non-compliant scan findings, which triggers a Lambda function to dispatch a GitHub Actions workflow. The workflow triggers EKS to perform a safe rolling replacement of non-compliant EKS managed node groups with new instances from the AMI baseline I defined in the Terraform launch template, preventing configuration drift.
+
 - I built the observability stack with Prometheus, Loki, and Grafana which provides a single pane of glass to correlate infrastructure metrics, application logs, and Falco runtime alerts.
 
 - I separated Terraform root modules into independent stacks and managed it with Terragrunt for dependency-aware planning and reducing blast radius. I implemented GitHub OIDC federation with separate least-privilege plan and apply roles scoped to each workflow file and branch to prevent cross-workflow privilege escalation.
 
-- I am currently implementing the remaining supply chain controls including SBOM generation, image signing with Cosign, GitHub Actions workflow files with SHA pinning for all third-party actions, secrets and security scanning with TruffleHog, Trivy, Snyk, Hadolint, and Checkov, and GitOps with ArgoCD.
+- I implemented supply chain controls including SBOM generation, image signing with Cosign, GitHub Actions workflow files with SHA pinning for all third-party actions, secrets, misconfigurations, and security scanning with TruffleHog, Kubeconform, Trivy, Semgrep, Gator, Hadolint, and Checkov, and GitOps with ArgoCD.
 
-- I am also completing the automated patching loop by adding an EventBridge rule to detect non-compliant scan findings, trigger a CI/CD pipeline webhook that will update the Terraform launch template with the latest EKS-optimised AMI, and trigger a safe rolling node replacement.
 
 ---
 
@@ -42,6 +43,7 @@ Defense-in-depth security for cloud-native applications on AWS EKS covering thre
 - [EventBridge and Lambda Automated Remediation](#eventbridge-and-lambda-automated-remediation)
 - [Observability and Monitoring](#observability-and-monitoring)
 - [Branch Protection, AWS OIDC, and Workflow IAM Roles](#branch-protection-aws-oidc-and-workflow-iam-roles)
+- [CI/CD Pipelines and GitOps with ArgoCD](#ci/cd-pipelines-and-gitops-with-argocd)
 
 ---
 
@@ -80,7 +82,7 @@ Initially, while in Minikube for local testing, I deployed both pods in the same
 
 ### A: Kubernetes Pod Security Standard
 
-To mitigate the risk of a container runtime vulnerability such as a runc CVE or dirty-pipe class exploit that can allow an attacker to escape the container and access the underlying EKS worker node or an attacker with Kubernetes API access modifying a running pod specification to inject privileged capabilities, mount the host filesystem, or insert malicious code, I enforced the Kubernetes Restricted Pod Security Standard Profile on [DVWA](k8s/dvwa/dvwa.yaml) and [Database](k8s/database/mariadb.yaml) namespaces. 
+To mitigate the risk of a container runtime vulnerability such as a runc CVE or dirty-pipe class exploit that can allow an attacker to escape the container and access the underlying EKS worker node or an attacker with Kubernetes API access modifying a running pod specification to inject privileged capabilities, mount the host filesystem, or insert malicious code, I enforced the Kubernetes Restricted Pod Security Standard Profile on [DVWA](k8s/dvwa/namespace.yaml) and [Database](k8s/database/namespace.yaml) namespaces. 
 
 This will prevent any of the container processes from gaining more privileges than it started with, block the container from running as root because if a root process inside a container escapes the container boundary and lands on the node as root, it gives the attacker immediate control of the node. It will also drop all linux capabilities which are granular units of root privilege so that non of the containers can perform privileged operations even while running as a non-root user, blocks dangerous Linux system calls that the containers have no legitimate reason to invoke, and blocks hostPath mounts, hostNetwork, and hostPID.
 
@@ -372,9 +374,9 @@ targets:
 
 **SecretStore and ExternalSecret**
   
-- I configured namespace restricted Secret Stores for for [dvwa](k8s/dvwa/dvwa.yaml), [database](k8s/database/database-secret-store.yaml), [mysqld](k8s/database/monitoring-secret-store.yaml), and [Grafana Admin](k8s/observability/observability-secretstore.yaml) secrets. A namespaced SecretStore cannot be used by other namespaces, which prevents a compromised pod in a different namespace from leveraging it to read secrets from another namespace. For mariadb pod and the mysqld-exporter which lives in the same namespace, I implemented least privilege by configuring different secrets stores and eso roles for them, restricting their access to their specific secret paths
+- I configured namespace restricted Secret Stores for for [dvwa](k8s/dvwa/dvwa-secret-store.yaml), [database](k8s/database/database-secret-store.yaml), [mysqld](k8s/database/monitoring-secret-store.yaml), and [Grafana Admin](k8s/observability/observability-secretstore.yaml) secrets. A namespaced SecretStore cannot be used by other namespaces, which prevents a compromised pod in a different namespace from leveraging it to read secrets from another namespace. For mariadb pod and the mysqld-exporter which lives in the same namespace, I implemented least privilege by configuring different secrets stores and eso roles for them, restricting their access to their specific secret paths
 
-- I enabled a refreshInterval of 1h on the external secret so that ESO polls Vault every hour. If the password is rotated in Vault, ESO will automatically update the secrets within the hour without requiring the pods to restart.
+- I enabled a refreshInterval of 1h on the external secret so that ESO polls Vault every hour. If the password is rotated in Vault, ESO will automatically update the secrets within the hour without requiring the pods to restart. This will limit the attack window from a stolen password.
 
 - In this development environment where I do a daily destroy of the infrastructure for cost management, key rotation is not critical. So, I used static keys stored in Vault KV for the database root password, application database user, mysqld-exporter credentials, and Grafana admin password. ESO syncs these into Kubernetes Secrets which the pods consume at runtime eliminating hardcoded credentials in manifests or values files.
 
@@ -400,7 +402,7 @@ targets:
 
 - I initially used kubernetes reflector to reflect the [Vault](k8s/cert-manager/vault-certificate.yaml) certificate to ESO namespace. I moved away from it because it mirrors the entire Kubernetes Secret, which for a TLS certificate, includes the private key alongside the public certificate which ESO needs. Distributing the private key to the ESO namespace unnecessarily is a real exposure where if the ESO namespace is compromised, the attacker gets the private key and can impersonate Vault.
 
-- I resolved to using [Trust manager](k8s/cert-manager/trust-manager-values.yaml) which distributes only the public certificate into a ConfigMap in the ESO namespace.  I also scoped the trust bundle distribution to only the ESO namespace following the principle of least privilege.
+- I resolved to using [Trust manager](k8s/trust-manager/vault-ca-bundle.yaml) which distributes only the public certificate into a ConfigMap in the ESO namespace.  I also scoped the trust bundle distribution to only the ESO namespace following the principle of least privilege.
 
 - This encryption is at the application layer. In a Zero-trust production environment with many microservices, I can enable Vault PKI and configure Vault as an intermediate CA to provide dynamic certificate for the cluster service mesh for mutual authentication and network level encryption of all microservices connection.
 
@@ -506,8 +508,8 @@ targets:
 - I removed this rule in AWS environment because monitoring all internal cluster traffic would lead to alert fatigue because hundreds of containers continuously make outbound connections within the cluster.
 
 - I triggered the rules to confirm that falco is correctly firing the alerts.
-- 
-![Falco Firing](screenshots/phase1/falco_test.png)
+  
+- ![Falco Firing](screenshots/phase1/falco_test.png)
 
 **Falco Sidekick**
 
@@ -627,9 +629,11 @@ targets:
 
  **[SSM Patch Management](terraform/modules/eks/patching.tf)**
  
-- I configured SSM Patch Manager with a patch baseline for Amazon Linux 2023 nodes, a weekly maintenance window, and a Scan-only operation. I used Scan rather than Install for optimised EKS AMIs. This replaces the AMI as a whole rather than patching in place; installing packages live on a running node risks drifting away from the tested AMI configuration. The Scan operation will provide visibility on when a node's AMI is outdated. I configured the launch templates to tag instances with the Patch Group tag so the maintenance window will correctly target the right instances.
+- I configured SSM Patch Manager with a patch baseline for Amazon Linux 2023 nodes, a weekly maintenance window, and a Scan-only operation. I used Scan rather than Install for optimised EKS AMIs. This way, the AMI is replaced as a whole rather than patching in place; installing packages live on a running node risks drifting away from the tested AMI configuration. The Scan operation will provide visibility on when a node's AMI is outdated. I configured the launch templates to tag instances with the Patch Group tag so the maintenance window will correctly target the right instances.
 
-- At the CI/CD stage, I will configure EventBridge rule which will be triggered by the SSM patch compliance findings to invoke a lambda weebhook forwarder to the CI/CD pipeline. This way, EKS can safely perform the draining, cordoning, and replacing nodes sequentially.
+- I configured EventBridge rule which is triggered by the SSM patch compliance findings to invoke a [lambda webhook forwarder](terraform/modules/eks/lambda.tf) to dispatch a [GitHub action workflow](.github/workflows/patching.yml) which triggers EKS to safely perform the cordoning, draining, and replacement of non-compliant nodes sequentially. This aligns with GitOps principle where all changes to infrastructure go through Git allowing manual approval, provides centralized audit logs, and prevents configuration drift.
+
+- In a production environment, I would cofigure a Pod Disruption Budget to prevent total downtime during node replacement.
 
 
 **[SSM Session Manager](terraform/modules/security/ssm_logging.tf)**
@@ -693,6 +697,10 @@ targets:
   
 - I linked Config and Guardduty to Security Hub to have a centralized dashboard for the security findings for easy monitoring. I configured the Security Control mode which consolidates controls so that the same underlying check only produces one finding regardless of how many standards reference it which reduces noise.
 
+![Security HUb](screenshots/phase2/security_hub_from_guardduty.png)
+
+*Security hub overview of guardduty findings*
+
 ---
 
 ## EventBridge and Lambda Automated Remediation
@@ -710,6 +718,16 @@ targets:
 - Similarly, I configured the GuardDuty findings that indicate node compromise such as "Trojan:EC2/DNSDataExfiltration", "Trojan:EC2/DGADomainRequest.B", "Impact:EC2/BitcoinDomainRequest.Reputation", and "Impact:EC2/MaliciousDomainRequest.Reputation" to send sns alert instead of isolating the node. In a production environment, with high availability, these alerts would require isolating the node automatically.
 
 - I configured the compromised credential finding to be auto-remediated by applying a deny policy to the IAM role or deactivating the access key. This is because for that threat to be flagged, AWS's threat intelligence has already made the determination with high confidence. Requiring human review before remediating widens the window between detection and containment, and this leaves the credentials active giving the attacker time to create new credentials, escalate privileges, or exfiltrate data. The [lambda function](lambda/revoke_iam_session/handler.py) denies the specific session or deactivates the specific key, so the blast radius is contained.
+
+![Lambda](screenshots/phase2/lambda_triggered.png)
+
+*Lamda triggered by GuardDuty finding*
+
+![Lambda](screenshots/phase2/lambda_cli.png)
+
+*Log findings from revoke_iam_session lambda*
+
+- This proves the lamda autoremediation is active. It failed to disable the IAM identity because this was triggered by GuardDuty sample findings
 
 ---
 
@@ -757,7 +775,7 @@ In this project, I used port forwarding to access the dashboard, I could also al
   
 **[Grafana Alloy](k8s/observability/alloy-values.yaml)**
 
-- For Alloy to function as a log shipper, it needs access to /var/log which is a host-mounted path on the node filesystem. It needs this access to read pod log files directly from disk which captures crash logs from pods that have already died. The default Helm chart also gives Alloy cluster-wide RBAC permissions including read access to Secrets across all namespaces. An attacker who compromises the Alloy container and steals its automatically mounted service account token can use that token directly against the Kubernetes API, bypassing Alloy's config language entirely, and can read every Secret in every namespace. Because Kubernetes Secrets are only base64 encoded, not encrypted at the API level, the credentials will be readable.
+- I configured Alloy as the log shipper through loki.source.file, it needs access to /var/log which is a host-mounted path on the node filesystem. It needs this access to read pod log files directly from disk which captures crash logs from pods that have already died which loki.source.kubernetes would not provide. The default Helm chart also gives Alloy cluster-wide RBAC permissions including read access to Secrets across all namespaces. An attacker who compromises the Alloy container and steals its automatically mounted service account token can use that token directly against the Kubernetes API, bypassing Alloy's config language entirely, and can read every Secret in every namespace. Because Kubernetes Secrets are only base64 encoded, not encrypted at the API level, the credentials will be readable.
 
 - I scoped down these permissions so that even with a stolen token, access is limited to pod metadata, namespaces, and node information. 
 
@@ -773,17 +791,69 @@ In this project, I used port forwarding to access the dashboard, I could also al
 
 - I configured AWS OIDC federation for GitHub Actions roles so that to prevent exposing AWS credentials anywhere. 
 
-- I created six IAM roles: one plan role and one apply role for each of the three workflows to enforce least privilege. I also locked each role to its specific workflow file through the OIDC trust condition. The plan roles have read-only access while the apply roles will have the permissions needed to create and modify resources in its module. This will prevent compromise of a plan role being used to destroy or modify infrastructure.
+- I created six IAM roles: one plan role and one apply role for each of the three IaC workflows to enforce least privilege. I also locked each role to its specific workflow file through the OIDC trust condition. The plan roles have read-only access while the apply roles will have the permissions needed to create and modify resources in its module. This will prevent compromise of a plan role being used to destroy or modify infrastructure.
 
 - I also configured the apply roles with an additional constraint; they can only be assumed from the main branch. This will prevent apply role from running from a feature branch so that infrastructure changes must go through the pull request review process and be merged to main before any apply can happen.
 
-- Currently, the apply roles have Administrator Access. This is because predicting the exact IAM permissions a Terraform workflow needs before running is impractical. I intend to harden this after the first full apply by using IAM Access Analyzer to analyse the CloudTrail logs generated during the apply and generate a least-privilege policy based on what each role actually called. This follows the principle of least privilege and reduces blast radius if a role is compromised.
+- I initially started with the apply roles having Administrator Access. This is because predicting the exact IAM permissions a Terraform workflow needs before running is impractical. I hardened this after the first full apply by using IAM Access Analyzer to analyse the CloudTrail logs generated during the apply and generated least-privilege policies for the [network](terraform/cicd/network-apply-policy.tf), [security](terraform/cicd/security-apply-policy.tf), and [eks](terraform/cicd/eks-apply-policy.tf) roles based on what each role actually called. This follows the principle of least privilege and reduces blast radius if a role is compromised.
   
 - In a production environment I would perform this analysis in a staging environment first, validate that the streamlined permissions do not break any workflow, and then apply the scoped policies to production.
 
+- I  also created the [container apply role](terraform/cicd/ecr.tf) used by the appsec pipleine to push images to ECR, and the [patching role](terraform/cicd/patching.tf) used by the automated node remediation pipeline to trigger EKS nodegroup rolling updates.
+
 **[Branch and Environment Protection](terraform/cicd/environment.tf)**
 
-- I configured branch protection on main to require pull request reviews before merge. I also configured environment protection on the production environment so that apply jobs will require a manual approval gate before running. This will provide a final checkpoint before infrastructure changes are applied.
+- I configured branch protection on main to require pull request reviews before merge to prevent merging of misconfigurations or malicious changes. I also configured environment protection on the production environment so that apply jobs will require a manual approval gate before running. This will provide a final checkpoint before infrastructure changes are applied.
 
 
+## CI/CD Pipelines and GitOps with ArgoCD
 
+**IaC Pipelines ([Network](.github/workflows/network.yml), [Security](.github/workflows/security.yml), [EKS](.github/workflows/eks.yml))**
+
+- Each IaC pipeline is triggered on pull requests and pushes to main. Plan jobs run automatically on PR to surface what will change before merge. I enforced environment gate on Apply jobs to require manual approval, ensuring no infrastructure change reaches AWS without human review.
+
+- Each pipeline scans for secrets with TruffleHog on every run to prevent secrets from being accidentally committed to the repository. 
+
+- I configured Checkov to run twice: once on the .tf source files and once on the resolved tfplan.json. Static scanning catches misconfigurations in the source but misses dependencies that only resolves at plan time. Running both gives me coverage at two different stages of the pipeline.
+
+- I write the Terraform plan output as a PR comment. This will enable reviewers to see exactly what will change in AWS before approving and merging to main. 
+
+**[Appsec pipeline](.github/workflows/appsec.yml)**
+
+- The appsec pipeline triggers on any change to the Dockerfile. It builds a hardened image from the base DVWA image with a non-root user enforced.
+
+- I configured Hadolint to lint the Dockerfile. This catches misconfigurations like unnecessary privileges, running as root, using latest tags before the image is built. This enforces Dockerfile best practices as a gate. Although I used a prebuilt dvwa image on this project, so hadolint scope was limited. It only caught the latest image tag.
+
+- After building, the pipeline pushes the image to ECR and signs the image digest with Cosign using a key pair stored as GitHub secrets. This signature provides the cryptographic proof that the image came from the CI pipeline and has not been tampered with.
+
+- In production, I could migrate to keyless signing using Sigstore’s OIDC flow to eliminate long lived static keys and the risk of any admin bypassing the build pipeline. This way, the ephemeral private key exists only in memory during the signing step and every signing event recorded in Sigstore’s immutable log, providing an audit trail tied to the exact workflow identity. 
+
+- I would also close the supply chain loop by integrating OPA Gatekeeper with Ratify to so that any pod referencing an image without a valid co-sign signature is rejected admission. This enforces that only images built and signed by the CI pipeline can run in the cluster.
+
+- I use Trivy for SBOM generation. The SBOM provides an inventory of every package in the image which is useful for auditing and for identifying affected images quickly when a new CVE is published. I deliberately disabled vulnerability scanning because DVWA is a vulnerable application by design and scanning it would generate hundreds of findings that would need to be suppressed. In a production environment, I would enable vulnerability scanning and integrate Dependabot alongside Trivy to monitor upstream registries and opens PRs before vulnerabilities are introduced.
+
+- Here is a project where I implemented Trivy for container vulnerability scanning [link](https://github.com/actualmira/DevSecOps-Automated-Security-Scanning)
+
+**[Kubernetes Pipeline](.github/workflows/kubernetes.yml)**
+
+- The Kubernetes pipeline is triggered on any change to the [k8s/ directory](k8s).
+
+- I use Kubeconform to validate all manifests against the Kubernetes API schema before they reach the cluster. This catches structural errors like wrong field names, invalid API versions, missing required fields that would cause failures at apply time.
+
+- I run Trivy to scan Kubernetes manifests and rendered Helm charts for misconfigurations including exposed secrets, privileged containers, missing resource limits, and container security context violations.
+
+- I integrated Gator to enforce two custom OPA Gatekeeper policies that Trivy does not cover: a network policy constraint that ensures every namespace has a default-deny NetworkPolicy, and an RBAC constraint that ensures all workload resources uses a specified service account. This provides Policy as code in the pipeline.
+
+**[Lambda Pipeline](.github/workflows/lambda.yml)**
+
+- I integrated Semgrep for static analysis of the Lambda function code to catch security vulnerabilities before deployment including hardcoded credentials, injection vulnerabilities, and unsafe use of AWS SDK patterns.
+
+- I used the free Semgrep OSS ruleset for this project. The OSS rules cover common vulnerability patterns and are sufficient for the Lambda functions in this project which are relatively simple event-driven handlers. In a production environment with more complex business logic I would use the full Pro ruleset which includes deeper taint analysis, framework-specific rules, and custom rule authoring.
+
+**GitOps with ArgoCD**
+
+- I configured ArgoCD with an App of Apps pattern where the [root Application](argocd/root-app.yaml) watches the [argocd/apps/](argocd/apps) directory and manages every other Application. This prevents configuration drift and makes the cluster fully reproducible.
+
+- I enabled automated syncing policy with self healing so that every merge to main branch is automatically applied to the cluster and any manual change to a cluster resource is detected and reverted. Making Git the only deployment trigger. I also enabled prune so that resources removed from git are automatically deleted from the cluster, preventing orphaned resources from consuming capacity or being an extra attack surface.
+
+- ArgoCD currently runs with cluster-admin access and no project-level RBAC scoping. This is because this is a single-cluster demo deployment. In a multi-team environment, I would define ArgoCD Projects with AppProject CRDs scoping each team to their own namespaces, source repositories, and destination clusters. This will provide least privilege permissions, limit blast radius and prevent cross-team interference.
